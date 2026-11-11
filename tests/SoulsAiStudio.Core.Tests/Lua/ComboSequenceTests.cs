@@ -86,3 +86,50 @@ public class ComboSequenceTests
         Assert.Equal([3041], ComboSequence.Flatten(act50, _ => 0).Select(s => s.AnimId));
     }
 }
+
+public class ComboSequenceLocalsTests
+{
+    private const string TrueMonkAct05 = """
+        Goal.Act05 = function (ai, goal, paramTbl)
+            local distanceEnemy = ai:GetDist(TARGET_ENE_0)
+            local stopDist = 7 - ai:GetMapHitRadius(TARGET_SELF)
+            local goalLife = 3
+            if stopDist < distanceEnemy then
+                goal:AddSubGoal(GOAL_COMMON_ApproachTarget, goalLife, TARGET_ENE_0, stopDist, TARGET_SELF, walk, -1)
+            end
+            local animationId = 3010
+            local animationId_2 = 3011
+            local f8_local6 = 9 - ai:GetMapHitRadius(TARGET_SELF)
+            local successDist = 9999
+            goal:AddSubGoal(GOAL_COMMON_ComboTunable_SuccessAngle180, 10, animationId, TARGET_ENE_0, 9999, 0, 0, 0, 0)
+            goal:AddSubGoal(GOAL_COMMON_ComboFinal, 10, animationId_2, TARGET_ENE_0, successDist, 0, 0)
+            return 0
+        end
+        """;
+
+    [Fact]
+    public void AnimIdsFromNumericLocals_AreResolved()
+    {
+        var goal = GoalOutline.Build(TrueMonkAct05).Single(g => g.Name == "Act05");
+        var steps = ComboSequence.Flatten(ComboSequence.Build(TrueMonkAct05, goal), _ => 0);
+        Assert.Equal([3010, 3011], steps.Select(s => s.AnimId));
+        Assert.Equal([3010, 3011], AnimReferences.Build(TrueMonkAct05).Select(a => a.AnimId));
+    }
+
+    [Fact]
+    public void ExpressionsAndFieldAccess_AreNotTreatedAsConstants()
+    {
+        const string src = """
+            Goal.Z = function (ai, goal)
+                local a = 3000 + 5
+                local b = 3020
+                b = b
+                goal:AddSubGoal(GOAL_COMMON_Attack, 10, a, TARGET_ENE_0)
+                goal:AddSubGoal(GOAL_COMMON_Attack, 10, b, TARGET_ENE_0)
+                goal:AddSubGoal(GOAL_COMMON_Attack, 10, tbl.x, TARGET_ENE_0)
+            end
+            """;
+        var goal = GoalOutline.Build(src).Single();
+        Assert.Equal([3020], ComboSequence.Flatten(ComboSequence.Build(src, goal), _ => 0).Select(s => s.AnimId));
+    }
+}

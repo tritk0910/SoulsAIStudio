@@ -91,6 +91,9 @@ public static class ComboSequence
 
     private sealed class Parser(string src, List<LuaToken> t, HashSet<string> randomVars)
     {
+        /// <summary>Locals last assigned a numeric literal (<c>local animationId = 3010</c>), in source order.</summary>
+        private readonly Dictionary<string, int> _numericLocals = new(StringComparer.Ordinal);
+
         private bool Is(int i, string s) => i < t.Count && t[i].Is(src, s);
         private bool IsKw(int i, string s) => i < t.Count && t[i].Kind == LuaTokenKind.Keyword && t[i].Is(src, s);
 
@@ -108,6 +111,7 @@ public static class ComboSequence
                     SkipBlock(ref i);
                     continue;
                 }
+                if (TryNumericAssignment(i)) { i++; continue; }
                 if (Is(i, ":") && Is(i + 1, "ClearSubGoal")) { nodes.Add(new ComboClear(t[i].Line)); i += 2; continue; }
                 if (Is(i, ":") && Is(i + 1, "AddSubGoal") && Is(i + 2, "(") && TryStep(i, out var step))
                 {
@@ -128,9 +132,26 @@ public static class ComboSequence
             string goalType = t[k].Text(src).ToString();
             k += 2;
             if (Is(k, "-")) k++;
-            if (!Is(k + 1, ",") || k + 2 >= t.Count || t[k + 2].Kind != LuaTokenKind.Number) return false;
-            if (!int.TryParse(t[k + 2].Text(src), out int anim)) return false;
-            step = new ComboStep(t[k + 2].Line, anim, goalType);
+            if (!Is(k + 1, ",") || k + 2 >= t.Count) return false;
+            var argTok = t[k + 2];
+            int anim;
+            if (argTok.Kind == LuaTokenKind.Number) { if (!int.TryParse(argTok.Text(src), out anim)) return false; }
+            else if (argTok.Kind == LuaTokenKind.Identifier && !Is(k + 3, ".") && !Is(k + 3, ":") && !Is(k + 3, "(")
+                     && _numericLocals.TryGetValue(argTok.Text(src).ToString(), out anim)) { }
+            else return false;
+            step = new ComboStep(argTok.Line, anim, goalType);
+            return true;
+        }
+
+        /// <summary>Records <c>[local] name = &lt;integer&gt;</c> when the value is a lone literal (not part of an expression).</summary>
+        private bool TryNumericAssignment(int i)
+        {
+            if (t[i].Kind != LuaTokenKind.Identifier || !Is(i + 1, "=") || i + 2 >= t.Count || t[i + 2].Kind != LuaTokenKind.Number) return false;
+            if (i > 0 && (Is(i - 1, ".") || Is(i - 1, ":") || Is(i - 1, ","))) return false;
+            var after = i + 3 < t.Count ? t[i + 3].Text(src) : default;
+            if (after is "+" or "-" or "*" or "/" or "%" or "^" or ".." or "," or ".") return false;
+            if (!int.TryParse(t[i + 2].Text(src), out int value)) return false;
+            _numericLocals[t[i].Text(src).ToString()] = value;
             return true;
         }
 
