@@ -48,7 +48,17 @@ public sealed class SasProject
         if (project.FormatVersion > CurrentFormatVersion)
             throw new NotSupportedException($"'{path}' was made by a newer version (format {project.FormatVersion}).");
         project.FilePath = Path.GetFullPath(path);
+        project.ThrowIfInvalid();
         return project;
+    }
+
+    /// <summary>Folder problems that would make saving unsafe (see <see cref="WritePolicy.ValidateFolders"/>).</summary>
+    public IReadOnlyList<string> Validate() => WritePolicy.ValidateFolders(GameDir, ModDir);
+
+    public void ThrowIfInvalid()
+    {
+        var problems = Validate();
+        if (problems.Count > 0) throw new InvalidOperationException("Invalid project folders: " + string.Join(" ", problems));
     }
 
     public void Save() => SaveAs(FilePath);
@@ -64,6 +74,7 @@ public sealed class SasProject
     public static SasProject Create(string path, string name, string gameDir, string modDir, IEnumerable<ProjectScript> scripts)
     {
         var p = new SasProject { Name = name, GameDir = gameDir, ModDir = modDir, Scripts = scripts.ToList() };
+        p.ThrowIfInvalid();
         p.SaveAs(path);
         Directory.CreateDirectory(p.BackupDir);
         Directory.CreateDirectory(p.CacheDir);

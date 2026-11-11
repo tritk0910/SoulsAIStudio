@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- Machine has only .NET 10 runtime; allow running net9 tests on it -->
+    <RollForward>LatestMajor</RollForward>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SoulsAiStudio.Editor\SoulsAiStudio.Editor.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The editor project does not copy ImGui.NET (DSAS ships it); tests need it to load the types. -->
+    <Reference Include="ImGui.NET">
+      <HintPath>..\..\Lib\ImGui.NET.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -102,6 +102,7 @@
     <ProjectReference Include="..\SoulsAssetPipeline\SoulsAssetPipeline\SoulsAssetPipeline.csproj" />
     <ProjectReference Include="..\SoulsAssetPipeline\SoulsFormats\SoulsFormats.csproj" />
     <ProjectReference Include="..\src\SoulsAiStudio.Core\SoulsAiStudio.Core.csproj" /> <!-- [SAS] -->
+    <ProjectReference Include="..\src\SoulsAiStudio.Editor\SoulsAiStudio.Editor.csproj" /> <!-- [SAS] -->
   </ItemGroup>
 
   <ItemGroup>

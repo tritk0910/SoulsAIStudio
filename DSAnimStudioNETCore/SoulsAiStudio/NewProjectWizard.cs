@@ -55,7 +55,10 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + vp.WorkSize * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
             ImGui.SetNextWindowSize(new Vector2(900, 680), ImGuiCond.Appearing);
             bool focused = false;
-            if (ImGui.Begin("New Project##sas_wizard", ref _open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
+            bool visible = ImGui.Begin("New Project##sas_wizard", ref _open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
+            try
+            {
+            if (visible)
             {
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
 
@@ -90,7 +93,8 @@ namespace SoulsAiStudio.App
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new Vector2(100, 30))) _open = false;
             }
-            ImGui.End();
+            }
+            finally { ImGui.End(); }
             return focused;
         }
 
@@ -171,7 +175,8 @@ namespace SoulsAiStudio.App
             ImGui.TableSetupColumn("Source", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableSetupColumn("Format", ImGuiTableColumnFlags.WidthFixed, 90);
             ImGui.TableHeadersRow();
-
+            try
+            {
             foreach (var c in Visible())
             {
                 ImGui.TableNextRow();
@@ -193,7 +198,8 @@ namespace SoulsAiStudio.App
                 ImGui.TableNextColumn();
                 if (c.IsBytecode) ImGui.TextDisabled("bytecode"); else ImGui.TextColored(Theme.Ok, "plain text");
             }
-            ImGui.EndTable();
+            }
+            finally { ImGui.EndTable(); }
         }
 
         private IEnumerable<ScriptCandidate> Visible() => _candidates.Where(c =>
@@ -211,8 +217,8 @@ namespace SoulsAiStudio.App
         private void TryCreate()
         {
             _validation = null;
-            if (!Directory.Exists(_gameDir)) { _validation = "Sekiro folder not found."; return; }
-            if (!Directory.Exists(_modDir)) { _validation = "Mod folder not found."; return; }
+            var folderProblems = SoulsAiStudio.Core.IO.WritePolicy.ValidateFolders(_gameDir, _modDir);
+            if (folderProblems.Count > 0) { _validation = string.Join(" ", folderProblems); return; }
             if (_selected.Count == 0) { _validation = "Select at least one AI script."; return; }
             if (string.IsNullOrWhiteSpace(_name)) { _validation = "Give the project a name."; return; }
             string path = ProjectPath();

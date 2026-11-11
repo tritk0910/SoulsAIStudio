@@ -1313,6 +1313,7 @@ namespace DSAnimStudio
 
         private void WinForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (SoulsAiStudio.App.SasHooks.CancelCloseForUnsavedLua()) { e.Cancel = true; return; } // [SAS] unsaved Lua prompt
             if (zzz_DocumentManager.AnyDocumentWithCriticalLoadingTasks())
                 e.Cancel = true;
 

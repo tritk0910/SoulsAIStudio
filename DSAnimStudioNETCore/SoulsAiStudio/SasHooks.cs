@@ -11,8 +11,8 @@ namespace SoulsAiStudio.App
     /// </summary>
     public static class SasHooks
     {
-        private static SasApp? _app;
-        public static SasApp App => _app ??= new SasApp();
+        private static readonly Lazy<SasApp> _app = new(() => new SasApp()); // thread-safe: WriteBinder runs on DSAS's loading thread
+        public static SasApp App => _app.Value;
 
         /// <summary>Called from <c>OSD.Build</c> after DSAS windows; draws our windows.</summary>
         public static void BuildWindows(ref bool anyFieldFocused)
@@ -41,6 +41,25 @@ namespace SoulsAiStudio.App
             Range(builder, 0x1EA0, 0x1EF9); // Vietnamese precomposed (ạ … ỹ)
             Range(builder, 0x2190, 0x21FF); // arrows used in the UI (→ ←)
             Range(builder, 0x25A0, 0x25FF); // geometric shapes (▶ ●)
+        }
+
+        /// <summary>
+        /// Called at the top of DSAS's <c>SaveCurrentFile</c>, before it writes anything (workspace json, .dsasbak,
+        /// .dsaproj). Returns false (and tells the user) when the anibnd lives in the game folder.
+        /// </summary>
+        public static bool AllowDsasSave(string anibndPath)
+        {
+            string? why = App.WhyWriteIsBlocked(anibndPath);
+            if (why == null) return true;
+            DSAnimStudio.ImguiOSD.DialogManager.DialogOK("Save blocked (Souls AI Studio)", why);
+            return false;
+        }
+
+        /// <summary>Called first in DSAS's FormClosing: true cancels the close (unsaved Lua and the user chose to stay).</summary>
+        public static bool CancelCloseForUnsavedLua()
+        {
+            try { return App.ConfirmExitWithUnsavedLua() == false; }
+            catch (Exception) { return false; } // never block exit because of our own bug
         }
 
         /// <summary>

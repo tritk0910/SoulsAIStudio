@@ -3,87 +3,86 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Text;
 using System.Threading.Tasks;
 using ImGuiNET;
-using Microsoft.Xna.Framework.Input;
 using SoulsAiStudio.Core.Lua.Analysis;
 using SoulsAiStudio.Core.Project;
+using SoulsAiStudio.Editor;
 
 namespace SoulsAiStudio.App
 {
     /// <summary>A script open in the editor, with its analysis snapshot.</summary>
     public sealed class OpenScript
     {
-        public OpenScript(ProjectScript script) => Script = script;
+        public OpenScript(ProjectScript script, DsasKeyInput keys)
+        {
+            Script = script;
+            Editor = new LuaCodeEditor { KeyInput = keys };
+            Editor.TextChanged += () => LastEdit = DateTime.UtcNow;
+        }
+
         public ProjectScript Script { get; }
+        public LuaCodeEditor Editor { get; }
         public Task<ScriptDocument>? Loading;
         public ScriptDocument? Doc;
-        public string Text = "";
         public string? Error;
-        public bool IsDirty => Doc != null && !string.Equals(Text, Doc.SavedText, StringComparison.Ordinal);
+        public bool IsDirty => Doc != null && Editor.IsDirty;
 
         // Analysis snapshot (built off the UI thread, debounced).
         public IReadOnlyList<GoalFunction> Outline = Array.Empty<GoalFunction>();
         public Task<IReadOnlyList<GoalFunction>>? OutlineTask;
-        public string OutlineSource = "";
+        public long OutlineVersion = -1;
         public DateTime LastEdit = DateTime.MinValue;
 
-        public int CursorLine;
-        public int? PendingJumpLine;
-        public Task<IReadOnlyList<string>>? Saving;
+        public Task<SaveResult>? Saving;
+        public long SavingVersion;
+        public string SavingText = "";
 
-        public GoalFunction? GoalAtCursor =>
-            Outline.LastOrDefault(g => g.Line <= CursorLine && CursorLine <= g.EndLine);
+        public int CursorLine => Editor.Cursor.Line;
+
+        public GoalFunction? GoalAtCursor
+        {
+            get
+            {
+                int line = CursorLine;
+                return Outline.LastOrDefault(g => g.Line <= line && line <= g.EndLine);
+            }
+        }
     }
 
-    /// <summary>
-    /// Lua editor panel with goal navigator breadcrumb (CLAUDE.md §5b).
-    /// INTERIM text widget: ImGui InputTextMultiline. It is replaced by the SoulsAiStudio.Editor widget
-    /// (ImGuiColorTextEditNet port) once that lands; the panel/navigator logic stays.
-    /// </summary>
-    public sealed unsafe class LuaEditorPanel
+    /// <summary>Lua editor panel (SoulsAiStudio.Editor widget) with the goal navigator breadcrumb (CLAUDE.md §5b).</summary>
+    public sealed class LuaEditorPanel
     {
         private static readonly TimeSpan AnalysisDebounce = TimeSpan.FromMilliseconds(250);
         private readonly SasApp _app;
         private readonly List<OpenScript> _open = new();
+        private readonly DsasKeyInput _keys = new();
         private OpenScript? _active;
-        private OpenScript? _cbTarget;
-        private OpenScript? _selectTab; // tab to force-select next frame (ImGui keeps its own selection otherwise)
+        private OpenScript? _selectTab; // force-select next frame (ImGui keeps its own tab selection otherwise)
         private string _navFilter = "";
-        private bool _ctrlSWasDown;
-        private readonly ImGuiInputTextCallback _callback;
         public bool IsOpen = true;
 
-        public LuaEditorPanel(SasApp app)
-        {
-            _app = app;
-            _callback = OnInputCallback;
-        }
+        public LuaEditorPanel(SasApp app) => _app = app;
 
         public ProjectScript? ActiveScript => _active?.Script;
         public OpenScript? Active => _active;
         public bool AnyDirty => _open.Any(o => o.IsDirty);
         public bool ActiveIsDirty => _active?.IsDirty == true;
+        public IEnumerable<string> DirtyScriptNames => _open.Where(o => o.IsDirty).Select(o => o.Script.FileName);
 
         public void Open(ProjectScript script)
         {
             var existing = _open.FirstOrDefault(o => o.Script.Key == script.Key);
             if (existing == null)
             {
-                existing = new OpenScript(script) { Loading = _app.Session!.OpenAsync(script) };
+                existing = new OpenScript(script, _keys) { Loading = _app.Session!.OpenAsync(script) };
                 _open.Add(existing);
             }
-            _active = existing;
-            _selectTab = existing;
+            _active = _selectTab = existing;
             IsOpen = true;
         }
 
-        public void JumpTo(int line)
-        {
-            if (_active == null) return;
-            _active.PendingJumpLine = line;
-        }
+        public void JumpTo(int line) => _active?.Editor.GoToLine(line);
 
         public void CloseAll()
         {
@@ -95,12 +94,15 @@ namespace SoulsAiStudio.App
         {
             var o = _active;
             if (o?.Doc == null || o.Saving != null || !o.IsDirty) return;
-            o.Saving = _app.Session!.SaveAsync(o.Doc, o.Text);
+            o.SavingVersion = o.Editor.Version;
+            o.SavingText = o.Editor.Text;
+            o.Saving = _app.Session!.SaveAsync(o.Doc, o.SavingText);
         }
 
-        /// <returns>True when the panel has focus.</returns>
+        /// <returns>True when the panel (or the editor inside it) has keyboard focus.</returns>
         public bool Build()
         {
+            _keys.NewFrame();
             foreach (var o in _open) PollTasks(o);
             if (!IsOpen) return false;
 
@@ -108,31 +110,28 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(340, 60), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(vp.WorkSize.X * 0.55f, vp.WorkSize.Y - 120), ImGuiCond.FirstUseEver);
             bool focused = false;
-            if (ImGui.Begin("Lua Editor##sas_editor", ref IsOpen, ImGuiWindowFlags.NoCollapse))
+            bool visible = ImGui.Begin("Lua Editor##sas_editor", ref IsOpen, ImGuiWindowFlags.NoCollapse);
+            try
             {
-                focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
-                if (focused) HandleShortcuts();
-                BuildTabs();
-                if (_active != null) BuildActive(_active);
-                else ImGui.TextDisabled("Open a script from the Scripts panel.");
+                if (visible)
+                {
+                    focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+                    if (focused && _keys.CtrlS) SaveActive();
+                    BuildTabs();
+                    if (_active != null) focused |= BuildActive(_active);
+                    else ImGui.TextDisabled("Open a script from the Scripts panel.");
+                }
             }
-            ImGui.End();
+            finally { ImGui.End(); } // keep ImGui's stack balanced even if a panel throws
             return focused;
-        }
-
-        private void HandleShortcuts()
-        {
-            var kb = Keyboard.GetState();
-            bool ctrl = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
-            bool down = ctrl && kb.IsKeyDown(Keys.S);
-            if (down && !_ctrlSWasDown) SaveActive();
-            _ctrlSWasDown = down;
         }
 
         private void BuildTabs()
         {
             if (!ImGui.BeginTabBar("##sas_tabs", ImGuiTabBarFlags.Reorderable | ImGuiTabBarFlags.FittingPolicyScroll)) return;
             OpenScript? close = null;
+            try
+            {
             foreach (var o in _open)
             {
                 bool keep = true;
@@ -145,11 +144,12 @@ namespace SoulsAiStudio.App
                 }
                 if (!keep)
                 {
-                    if (o.IsDirty) _app.Notify($"{o.Script.FileName} has unsaved changes — save or revert first.");
+                    if (o.IsDirty) _app.Notify($"{o.Script.FileName} has unsaved changes — save or undo them first.");
                     else close = o;
                 }
             }
-            ImGui.EndTabBar();
+            }
+            finally { ImGui.EndTabBar(); }
             _selectTab = null;
             if (close != null)
             {
@@ -158,26 +158,15 @@ namespace SoulsAiStudio.App
             }
         }
 
-        private void BuildActive(OpenScript o)
+        private bool BuildActive(OpenScript o)
         {
-            if (o.Error != null) { ImGui.TextColored(Theme.Error, o.Error); return; }
-            if (o.Doc == null) { ImGui.TextDisabled(o.Loading != null ? "Loading (decompiling if needed)..." : "Not loaded."); return; }
+            if (o.Error != null) { ImGui.TextColored(Theme.Error, o.Error); return false; }
+            if (o.Doc == null) { ImGui.TextDisabled(o.Loading != null ? "Loading (decompiling if needed)..." : "Not loaded."); return false; }
 
             BuildBreadcrumb(o);
             BuildStatusLine(o);
-
-            _cbTarget = o;
-            if (o.PendingJumpLine != null) ImGui.SetKeyboardFocusHere();
-            uint capacity = (uint)Math.Max(Encoding.UTF8.GetByteCount(o.Text) * 2, 1 << 16);
-            var flags = ImGuiInputTextFlags.AllowTabInput | ImGuiInputTextFlags.CallbackAlways;
-            ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.11f, 0.11f, 0.13f, 1f));
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.86f, 0.86f, 0.86f, 1f));
-            if (ImGui.InputTextMultiline("##sas_code", ref o.Text, capacity, new Vector2(-1, -1), flags, _callback))
-            {
-                o.LastEdit = DateTime.UtcNow;
-            }
-            ImGui.PopStyleColor(2);
-            _cbTarget = null;
+            o.Editor.SetHighlightLine(o.GoalAtCursor?.Line);
+            return o.Editor.Render("##sas_code", new Vector2(-1, -1));
         }
 
         private void BuildBreadcrumb(OpenScript o)
@@ -190,6 +179,8 @@ namespace SoulsAiStudio.App
             ImGui.SetNextItemWidth(320);
             if (ImGui.BeginCombo("##sas_nav", goal?.QualifiedName ?? "(top level)", ImGuiComboFlags.HeightLarge))
             {
+                try
+                {
                 if (ImGui.IsWindowAppearing()) { _navFilter = ""; ImGui.SetKeyboardFocusHere(); }
                 ImGui.SetNextItemWidth(-1);
                 ImGui.InputTextWithHint("##sas_nav_filter", "Filter goals (e.g. keng)", ref _navFilter, 64);
@@ -200,15 +191,17 @@ namespace SoulsAiStudio.App
                     ImGui.TextColored(Theme.GroupHeader, group.Key.ToString());
                     foreach (var g in items)
                     {
-                        if (ImGui.Selectable($"  {g.QualifiedName}##nav{g.Line}", g == goal)) o.PendingJumpLine = g.Line;
+                        if (ImGui.Selectable($"  {g.QualifiedName}##nav{g.Line}", g == goal)) o.Editor.GoToLine(g.Line);
                         ImGui.SameLine(240);
                         ImGui.TextDisabled($"function ({g.Parameters})");
                     }
                 }
-                ImGui.EndCombo();
+                }
+                finally { ImGui.EndCombo(); }
             }
             ImGui.SameLine();
-            ImGui.TextDisabled($"Ln {o.CursorLine + 1}");
+            var (line, col) = o.Editor.Cursor;
+            ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+G go to line · Ctrl+S save");
         }
 
         private static void BuildStatusLine(OpenScript o)
@@ -228,7 +221,7 @@ namespace SoulsAiStudio.App
                 if (load.IsCompletedSuccessfully)
                 {
                     o.Doc = load.Result;
-                    o.Text = o.Doc.SavedText;
+                    o.Editor.Text = o.Doc.SavedText; // resets undo, marks clean
                     o.LastEdit = DateTime.UtcNow - AnalysisDebounce; // analyze immediately
                 }
                 else o.Error = "Could not open: " + load.Exception?.GetBaseException().Message;
@@ -237,7 +230,14 @@ namespace SoulsAiStudio.App
             if (o.Saving is { IsCompleted: true } save)
             {
                 o.Saving = null;
-                if (save.IsCompletedSuccessfully) _app.Notify($"Saved {o.Script.FileName} → {save.Result.Count} file(s) in the mod folder (backup taken).");
+                if (save.IsCompletedSuccessfully)
+                {
+                    o.Doc?.MarkSaved(o.SavingText);
+                    // Only clean if nothing was typed while saving.
+                    if (o.Editor.Version == o.SavingVersion) o.Editor.MarkClean();
+                    if (save.Result.Warning != null) _app.ReportError($"{o.Script.FileName}: partial save", new Exception(save.Result.Warning));
+                    else _app.Notify($"Saved {o.Script.FileName} → {save.Result.WrittenFiles.Count} file(s) in the mod folder (backup taken).");
+                }
                 else _app.ReportError($"Saving {o.Script.FileName} failed", save.Exception?.GetBaseException());
             }
 
@@ -246,40 +246,13 @@ namespace SoulsAiStudio.App
                 o.OutlineTask = null;
                 if (ot.IsCompletedSuccessfully) o.Outline = ot.Result;
             }
-            else if (o.OutlineTask == null && o.Doc != null && !ReferenceEquals(o.OutlineSource, o.Text)
+            else if (o.OutlineTask == null && o.Doc != null && o.OutlineVersion != o.Editor.Version
                      && DateTime.UtcNow - o.LastEdit >= AnalysisDebounce)
             {
-                string snapshot = o.Text;
-                o.OutlineSource = snapshot;
+                o.OutlineVersion = o.Editor.Version;
+                string snapshot = o.Editor.Text;
                 o.OutlineTask = Task.Run(() => GoalOutline.Build(snapshot));
             }
-        }
-
-        /// <summary>Applies pending jumps and tracks the cursor line (runs while the text box is active).</summary>
-        private int OnInputCallback(ImGuiInputTextCallbackData* data)
-        {
-            var o = _cbTarget;
-            if (o == null) return 0;
-            var span = new ReadOnlySpan<byte>(data->Buf, data->BufTextLen);
-
-            if (o.PendingJumpLine is int line)
-            {
-                o.PendingJumpLine = null;
-                int offset = 0;
-                for (int l = 0; l < line && offset < span.Length; l++)
-                {
-                    int nl = span[offset..].IndexOf((byte)'\n');
-                    if (nl < 0) { offset = span.Length; break; }
-                    offset += nl + 1;
-                }
-                data->CursorPos = data->SelectionStart = data->SelectionEnd = offset; // ImGui scrolls to the cursor
-            }
-
-            int cursor = Math.Clamp(data->CursorPos, 0, span.Length);
-            int count = 0;
-            foreach (byte b in span[..cursor]) if (b == (byte)'\n') count++;
-            o.CursorLine = count;
-            return 0;
         }
     }
 }

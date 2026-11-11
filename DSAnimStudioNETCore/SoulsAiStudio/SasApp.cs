@@ -164,20 +164,21 @@ namespace SoulsAiStudio.App
 
         // ---------- safety for DSAS writes ----------
 
-        /// <summary>Non-null reason when DSAS must not write <paramref name="path"/> (inside the game folder, outside mods).</summary>
-        public string? WhyWriteIsBlocked(string path)
+        /// <summary>Non-null reason when a write to <paramref name="path"/> must be refused (game folder, outside mods).</summary>
+        public string? WhyWriteIsBlocked(string path) =>
+            SoulsAiStudio.Core.IO.WritePolicy.WhyBlocked(path, new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() });
+
+        /// <summary>Exit prompt for unsaved Lua (UI thread). True = OK to exit.</summary>
+        public bool ConfirmExitWithUnsavedLua()
         {
-            string full = Path.GetFullPath(path);
-            foreach (string? game in new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() })
-            {
-                if (string.IsNullOrEmpty(game)) continue;
-                string g = Path.GetFullPath(game).TrimEnd('\\') + "\\";
-                string mods = g + "mods\\";
-                if (full.StartsWith(g, StringComparison.OrdinalIgnoreCase) && !full.StartsWith(mods, StringComparison.OrdinalIgnoreCase))
-                    return $"Refusing to overwrite a file in the game folder:\n{full}\n\n" +
-                           "Open the file from your mod folder (mods\\<your mod>) instead, so the original game files stay untouched.";
-            }
-            return null;
+            if (!_editor.AnyDirty) { SaveProjectUiState(); return true; }
+            var r = System.Windows.Forms.MessageBox.Show(
+                "Some Lua scripts have unsaved changes:\n\n" + string.Join("\n", _editor.DirtyScriptNames) +
+                "\n\nQuit without saving?", "Souls AI Studio – unsaved changes",
+                System.Windows.Forms.MessageBoxButtons.YesNo, System.Windows.Forms.MessageBoxIcon.Warning,
+                System.Windows.Forms.MessageBoxDefaultButton.Button2);
+            if (r == System.Windows.Forms.DialogResult.Yes) { SaveProjectUiState(); return true; }
+            return false;
         }
 
         public void BackupBeforeExternalWrite(string path)

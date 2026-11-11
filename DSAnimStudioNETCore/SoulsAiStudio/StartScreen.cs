@@ -21,7 +21,10 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + vp.WorkSize * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
             ImGui.SetNextWindowSize(new Vector2(620, 420), ImGuiCond.Appearing);
             bool focused = false;
-            if (ImGui.Begin("Souls AI Studio##sas_start", ref IsOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
+            bool visible = ImGui.Begin("Souls AI Studio##sas_start", ref IsOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
+            try
+            {
+            if (visible)
             {
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
                 ImGui.TextColored(Theme.Accent, "Souls AI Studio");
@@ -56,7 +59,8 @@ namespace SoulsAiStudio.App
                     _app.Settings.Save();
                 }
             }
-            ImGui.End();
+            }
+            finally { ImGui.End(); }
             return focused;
         }
     }

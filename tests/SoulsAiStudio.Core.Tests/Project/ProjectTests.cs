@@ -88,7 +88,9 @@ public class ProjectTests
         Assert.Contains("Goal.Interrupt", doc.SavedText);
 
         string edited = doc.SavedText + "-- edited\n";
-        var written = await session.SaveAsync(doc, edited);
+        var result = await session.SaveAsync(doc, edited);
+        Assert.Null(result.Warning);
+        var written = result.WrittenFiles;
 
         Assert.Equal(2, written.Count); // unpacked .lua + repacked .dcx
         Assert.All(written, w => Assert.StartsWith(mod, w));
@@ -116,7 +118,9 @@ public class ProjectTests
         var doc = await session.OpenAsync(p.Scripts[0]);
         Assert.Equal(LuabndSource.Game, doc.LoadedFrom);
 
-        await session.SaveAsync(doc, doc.SavedText + "--x\n");
+        string text2 = doc.SavedText + "--x\n";
+        await session.SaveAsync(doc, text2);
+        doc.MarkSaved(text2);
         Assert.True(File.Exists(Path.Combine(mod, "script", "m77_00_00_00.luabnd.dcx")));
         Assert.Equal(LuabndSource.ModPacked, doc.LoadedFrom);
     }

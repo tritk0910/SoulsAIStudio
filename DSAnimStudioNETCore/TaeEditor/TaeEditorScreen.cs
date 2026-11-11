@@ -1231,6 +1231,7 @@ namespace DSAnimStudio.TaeEditor
         {
             if (!IsFileOpen)
                 return;
+            if (!SoulsAiStudio.App.SasHooks.AllowDsasSave(NewFileContainerName)) return; // [SAS] block before any DSAS write (game folder)
 
             CommitActiveGraphToTaeStruct();
 

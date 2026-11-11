@@ -29,10 +29,13 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(10, 60), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(320, vp.WorkSize.Y - 120), ImGuiCond.FirstUseEver);
             bool focused = false;
-            if (ImGui.Begin("Scripts##sas_scripts", ref IsOpen, ImGuiWindowFlags.NoCollapse))
+            var project = _app.Project;
+            if (project == null) return false;
+            bool visible = ImGui.Begin("Scripts##sas_scripts", ref IsOpen, ImGuiWindowFlags.NoCollapse);
+            try
             {
+                if (!visible) return false;
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
-                var project = _app.Project!;
                 ImGui.TextColored(Theme.Accent, project.Name);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{project.FilePath}\nMod: {project.ModDir}");
 
@@ -48,7 +51,7 @@ namespace SoulsAiStudio.App
                 ImGui.Separator();
                 BuildOutline();
             }
-            ImGui.End();
+            finally { ImGui.End(); }
             return focused;
         }
 
@@ -61,6 +64,8 @@ namespace SoulsAiStudio.App
             ImGui.SetNextItemWidth(-1);
             ImGui.InputTextWithHint("##sas_outline_filter", "Filter goals", ref _filter, 64);
             ImGui.BeginChild("##sas_outline", Vector2.Zero, false);
+            try
+            {
             var current = o.GoalAtCursor;
             foreach (var group in o.Outline.GroupBy(g => g.Group).OrderBy(g => g.Key))
             {
@@ -71,6 +76,8 @@ namespace SoulsAiStudio.App
                 bool open = ImGui.TreeNode($"{group.Key} ({items.Count})##grp{group.Key}");
                 ImGui.PopStyleColor();
                 if (!open) continue;
+                try
+                {
                 foreach (var g in items)
                 {
                     if (ImGui.Selectable($"{g.QualifiedName}##ol{g.Line}", g == current)) _editor.JumpTo(g.Line);
@@ -86,9 +93,11 @@ namespace SoulsAiStudio.App
                         ImGui.TextDisabled($"{g.AddSubGoalCount}");
                     }
                 }
-                ImGui.TreePop();
+                }
+                finally { ImGui.TreePop(); }
             }
-            ImGui.EndChild();
+            }
+            finally { ImGui.EndChild(); }
         }
     }
 }

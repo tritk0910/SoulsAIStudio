@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Souls AI Studio: ImGui Lua code editor widget.
+       Derived from ImGuiColorTextEditNet (MIT), see THIRD_PARTY_ImGuiColorTextEditNet.md.
+       Built against DSAS's ImGui.NET 1.87.3 (Lib/ImGui.NET.dll). GPLv3 overall (fork of DSAnimStudio). -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>SoulsAiStudio.Editor</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="ImGui.NET">
+      <HintPath>..\..\Lib\ImGui.NET.dll</HintPath>
+      <!-- DSAS ships its own copy next to the exe -->
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SoulsAiStudio.Editor.Tests" />
+  </ItemGroup>
+</Project>
