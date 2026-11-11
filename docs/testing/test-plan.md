@@ -29,6 +29,25 @@ Samples: Owl `m10_00_00_00/out/bin/506300_battle.lua` (c5060), Isshin `m11_02_00
 
 Data sources for future tests: `LuaCorpus.PlainText()`, `LuaCorpus.Bytecode()`, `LuaCorpus.All()`, `LuaCorpus.KeyBattleScripts()`, `Samples.LuabndNames()`, `LuabndBaselineTests.Luabnds()/UnpackedMaps()` (KRAK-aware). Oracle: `WitchyBnd4Xml.Load(...).BuildBnd4(dir)`.
 
+## 1b. Status — round 2 (project system, commit 12932e2 + must-fix API: SaveResult, per-luabnd lock, WritePolicy)
+
+Suite: 358 tests = 354 passed, 4 skipped (all `Skip = "BUG: ..."`), 0 failed. New files:
+`TestSupport/ModLayout.cs` (fake game+mod in temp), `Project/ProjectSessionStressTests.cs`, `Project/CatalogAndProjectFileTests.cs`,
+`Backup/BackupServiceTests.cs`, `Lua/LuaDecompilerTests.cs` (`[RequiresDecompilerFact]`, `%SAS_DECOMPILER%`), `Lua/LuaLexerTests.cs`, `Lua/GoalOutlineTests.cs`.
+
+| Plan item | Status |
+|---|---|
+| L3/L4 save KRAK m25 (unpacked + packed-only) | ✔ KRAK level 6 kept, other 68 entries byte-identical |
+| L6 atomic / read-only | ✔ RO `.dcx` → `ReadOnlyFileException`, mod unchanged; RO unpacked `.lua` → Warning (partial save). **BUG**: next save of another script in the same map reverts the edit (skipped test) |
+| L7 unpacked newer than dcx | ✔ open shows unpacked text; save keeps other external edits |
+| Concurrent saves same map (_battle + _logic style) | ✔ 3 rounds, both edits survive in dcx + folder |
+| B1–B3 backups | ✔ original untouched, prune to N, order across year boundary. **BUG**: same-ms timestamp reuses snapshot folder (skipped test; real clock didn't collide in 30 rapid calls) |
+| D2/D3 decompiler | ✔ missing exe → FileNotFoundException(path); aicommon bytecode → Lua, cache identical + fast, garbage not cached; 6 decompiled m10 battle scripts pass outline invariants |
+| E1/E2 lexer | ✔ long brackets with levels, escapes, hex/exp/`.5` numbers, positions, malformed input never throws |
+| E4 outline | ✔ all 10 plain-text corpus files: no overlap, EndLine ≥ Line, unique names, count == line-anchored regex; synthetic nesting/closures/loops/strings/comments |
+| Catalog | ✔ missing/empty folders, 5 kinds of corrupt archive each reported while others listed; unpacked KRAK needs no Oodle. Oodle-missing path not testable in-process (can't unload Oodle) |
+| Project file | ✔ newer FormatVersion → NotSupported, invalid folders → InvalidOperation, corrupt JSON → JsonException/FormatException. **BUGs (minor)**: JsonException message lacks the file path; `"scripts": null` loads as null |
+
 ## 2. P0 — Foundation
 
 ### 2.1 Luabnd read/write (Core/Formats) — TD/OO

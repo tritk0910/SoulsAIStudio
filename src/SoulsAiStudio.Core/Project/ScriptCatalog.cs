@@ -67,11 +67,39 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
 
     public LuabndArchive Open(string luabnd) => Locate(luabnd) switch
     {
-        LuabndSource.ModUnpacked => LuabndArchive.LoadUnpacked(ModUnpackedDir(luabnd)),
+        LuabndSource.ModUnpacked => OpenModUnpackedMerged(luabnd),
         LuabndSource.ModPacked => LuabndArchive.LoadPacked(ModPackedPath(luabnd)),
         LuabndSource.Game => LuabndArchive.LoadPacked(GamePackedPath(luabnd)),
         _ => throw new FileNotFoundException($"Luabnd '{luabnd}' not found in mod or game script folders."),
     };
+
+    /// <summary>
+    /// Loads the mod's unpacked folder, but for any entry whose content differs from the mod's packed
+    /// <c>.luabnd.dcx</c>, keeps whichever copy was written last (unpacked file mtime vs .dcx mtime). This protects
+    /// both directions: an edit in VSCode (unpacked newer) and a partial save where only the .dcx was updated
+    /// (packed newer) — the stale side never overwrites the newer one on the next repack.
+    /// </summary>
+    public LuabndArchive OpenModUnpackedMerged(string luabnd)
+    {
+        string dir = ModUnpackedDir(luabnd);
+        var archive = LuabndArchive.LoadUnpacked(dir);
+        string packedPath = ModPackedPath(luabnd);
+        if (!File.Exists(packedPath)) return archive;
+
+        LuabndArchive packed;
+        try { packed = LuabndArchive.LoadPacked(packedPath); }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException or NotSupportedException) { return archive; }
+
+        DateTime packedTime = File.GetLastWriteTimeUtc(packedPath);
+        foreach (LuabndEntry e in archive.Entries)
+        {
+            LuabndEntry? p = packed.Find(e.RelativePath);
+            if (p == null || p.Bytes.AsSpan().SequenceEqual(e.Bytes)) continue;
+            string file = Path.Combine(dir, e.RelativePath.Replace('\\', Path.DirectorySeparatorChar));
+            if (File.GetLastWriteTimeUtc(file) < packedTime) e.AdoptNewerBytes(p.Bytes);
+        }
+        return archive;
+    }
 
     /// <summary>Lists every .lua in every luabnd. Unreadable archives (e.g. Oodle missing) are reported, not thrown.</summary>
     public (List<ScriptCandidate> Scripts, List<string> Errors) Scan(CancellationToken ct = default)

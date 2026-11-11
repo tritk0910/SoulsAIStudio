@@ -39,6 +39,9 @@ public sealed class LuabndEntry
     }
 
     internal void MarkSaved() => IsModified = false;
+
+    /// <summary>Takes newer content from another copy of the same archive without marking the entry modified.</summary>
+    internal void AdoptNewerBytes(byte[] bytes) => Bytes = bytes;
 }
 
 /// <summary>

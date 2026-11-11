@@ -112,7 +112,7 @@ public sealed class ProjectSession
         string unpackedFile = Path.Combine(unpackedDir, script.EntryPath.Replace('\\', Path.DirectorySeparatorChar));
 
         bool hasUnpacked = File.Exists(Path.Combine(unpackedDir, WitchyBnd4Manifest.FileName));
-        LuabndArchive archive = hasUnpacked ? LuabndArchive.LoadUnpacked(unpackedDir)
+        LuabndArchive archive = hasUnpacked ? Catalog.OpenModUnpackedMerged(luabnd)
             : File.Exists(packedPath) ? LuabndArchive.LoadPacked(packedPath)
             : LuabndArchive.LoadPacked(Catalog.GamePackedPath(luabnd)); // first save: copy from game
         LuabndEntry entry = archive.Find(script.EntryPath)

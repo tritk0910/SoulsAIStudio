@@ -43,8 +43,13 @@ public sealed class SasProject
 
     public static SasProject Load(string path)
     {
-        var project = JsonSerializer.Deserialize<SasProject>(File.ReadAllText(path), Json)
-            ?? throw new FormatException($"'{path}' is not a valid project file.");
+        SasProject? project;
+        try { project = JsonSerializer.Deserialize<SasProject>(File.ReadAllText(path), Json); }
+        catch (JsonException ex) { throw new FormatException($"'{path}' is not a valid project file: {ex.Message}", ex); }
+        if (project == null) throw new FormatException($"'{path}' is not a valid project file.");
+        project.Scripts ??= [];
+        project.Ui ??= new ProjectUiState();
+        project.Ui.CursorLineByScript ??= [];
         if (project.FormatVersion > CurrentFormatVersion)
             throw new NotSupportedException($"'{path}' was made by a newer version (format {project.FormatVersion}).");
         project.FilePath = Path.GetFullPath(path);
