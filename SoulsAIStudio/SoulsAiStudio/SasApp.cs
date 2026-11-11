@@ -29,6 +29,7 @@ namespace SoulsAiStudio.App
         private readonly NewProjectWizard _wizard;
         private readonly ScriptsPanel _scripts;
         private readonly LuaEditorPanel _editor;
+        private readonly ComboPanel _combo;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
 
@@ -38,6 +39,7 @@ namespace SoulsAiStudio.App
             _wizard = new NewProjectWizard(this);
             _editor = new LuaEditorPanel(this);
             _scripts = new ScriptsPanel(this, _editor);
+            _combo = new ComboPanel(this, _editor);
 
             // "--sas-project <file.sasproj>" (or a bare .sasproj path, e.g. from a file association) opens it on launch.
             string[] args = Environment.GetCommandLineArgs();
@@ -143,6 +145,7 @@ namespace SoulsAiStudio.App
                 if (Layout.FocusEditorTabFrames > 0) { ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
                 focused |= _scripts.Build();
                 focused |= _editor.Build();
+                focused |= _combo.Build();
             }
             SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
             BuildErrorPopup();
@@ -172,7 +175,8 @@ namespace SoulsAiStudio.App
             ImGui.Separator();
             if (ImGui.MenuItem("Scripts Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
-            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = true; Layout.RequestApply(); }
+            if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
+            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = _combo.IsOpen = true; Layout.RequestApply(); }
             ImGui.EndMenu();
         }
 
@@ -258,7 +262,7 @@ namespace SoulsAiStudio.App
                 if (_errors.Count == 0) return;
                 ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
                 bool open = true;
-                if (ImGui.Begin("Souls AI Studio – Problem##sas_error", ref open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize))
+                if (Theme.BeginOpaque("Souls AI Studio – Problem##sas_error", ref open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize))
                 {
                     foreach (string e in _errors) ImGui.TextWrapped("• " + e);
                     if (ImGui.Button("OK")) open = false;

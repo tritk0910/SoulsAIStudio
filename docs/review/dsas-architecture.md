@@ -1,7 +1,7 @@
 # DSAS architecture review: hook points, §10 answers, conventions
 
 Reviewer: code-review agent (readability / scalability / maintainability). Read-only review of `sas/main` on 2026-11-11.
-Paths are relative to the repo root. `DSAS/` stands for `DSAnimStudioNETCore/`. Line numbers come from the current tree, so expect drift after upstream merges.
+Paths are relative to the repo root. `DSAS/` stands for `SoulsAIStudio/`. Line numbers come from the current tree, so expect drift after upstream merges.
 
 Size: DSAS has 383 `.cs` files and about 136k lines. It is one WinExe assembly with no nullable annotations. Global state: `zzz_DocumentManager.CurrentDocument` is referenced 612 times, `Main.Config` 244 times and `Main.TAE_EDITOR` 75 times.
 
@@ -190,7 +190,7 @@ Take the authoritative names from the Paramdex `SDT` paramdefs. For Bullet, look
 ### 4.2 Conventions for SAS code (top 5 first)
 1. **Hard layering.**
    - `src/SoulsAiStudio.Core` (net9.0, no MonoGame, ImGui, WinForms or DSAS reference) holds all analysis, the project, VFS, params, TAE read, undo model, Lua and GameProfile.
-   - UI and glue go in **`DSAnimStudioNETCore/SoulsAiStudio/**`** with namespace `SoulsAiStudio.App`. The SDK globs it automatically, the folder is new so it causes no merge conflict, and it can see DSAS internals.
+   - UI and glue go in **`SoulsAIStudio/SoulsAiStudio/**`** with namespace `SoulsAiStudio.App`. The SDK globs it automatically, the folder is new so it causes no merge conflict, and it can see DSAS internals.
    - Do not create a separate App exe yet. That would need DSAS refactored into a library: `Main.Directory`, embedded resources (`Main.GetEmbeddedResourceText` assumes the `DSAnimStudio.` prefix) and content copying all break.
    - DSAS gets exactly one new `ProjectReference` to Core (one `[SAS]` line in the csproj).
 2. **A thin adapter in front of DSAS statics.** `SoulsAiStudio.App/DsasBridge/*`:
@@ -250,7 +250,7 @@ The machine has SDK 10.0.401 and runtimes 6.0.36, 7.0.20 and 10.0.12. The 7.0 ru
 | Option | Upstream merge cost | Verdict |
 |---|---|---|
 | A. Install the .NET 9 Desktop Runtime (x64) | none | Works, but .NET 9 is STS. Its support ended around **2026-11-10**, after the STS extension to 24 months (verify the date). It is acceptable for local dev only, so do not make it a user requirement. |
-| B. RollForward without editing DSAS files: add `DSAnimStudioNETCore/runtimeconfig.template.json` with `{"rollForward":"LatestMajor"}` (a new file, so no conflict), or a root `Directory.Build.props` with `<RollForward>LatestMajor</RollForward>`. Prefer the template file: it scopes to the exe and does not touch MonoGame or SAP. | ~0 | **Recommended for shipping until upstream moves.** MonoGame WindowsDX, SharpDX and WinForms run on .NET 10. Smoke-test: open a Sekiro anibnd, save, and check hitboxes. |
+| B. RollForward without editing DSAS files: add `SoulsAIStudio/runtimeconfig.template.json` with `{"rollForward":"LatestMajor"}` (a new file, so no conflict), or a root `Directory.Build.props` with `<RollForward>LatestMajor</RollForward>`. Prefer the template file: it scopes to the exe and does not touch MonoGame or SAP. | ~0 | **Recommended for shipping until upstream moves.** MonoGame WindowsDX, SharpDX and WinForms run on .NET 10. Smoke-test: open a Sekiro anibnd, save, and check hitboxes. |
 | C. Retarget to net10.0 | High: DSAS csproj, the **SoulsAssetPipeline submodule** (SAP `net9.0-windows`, SoulsFormats `net9.0`, Havoc `net6.0-windows`) and MonoGame | **Not now.** Do it only when upstream DSAS retargets. Then follow upstream. |
 
 Keep `src/` and `tests/` on **net9.0** so they match DSAS. Core is referenced by the DSAS exe, so its TFM must be ≤ the exe's TFM. `RollForward` on the test and bench hosts is right.

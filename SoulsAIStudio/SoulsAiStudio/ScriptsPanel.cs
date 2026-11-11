@@ -31,7 +31,7 @@ namespace SoulsAiStudio.App
             bool focused = false;
             var project = _app.Project;
             if (project == null) return false;
-            bool visible = ImGui.Begin("Scripts##sas_scripts", ref IsOpen, ImGuiWindowFlags.NoCollapse);
+            bool visible = Theme.BeginOpaque("Scripts##sas_scripts", ref IsOpen, ImGuiWindowFlags.NoCollapse);
             try
             {
                 if (!visible) return false;

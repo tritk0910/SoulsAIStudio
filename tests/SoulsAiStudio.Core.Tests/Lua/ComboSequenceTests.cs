@@ -1,0 +1,88 @@
+using SoulsAiStudio.Core.Lua.Analysis;
+using SoulsAiStudio.Core.Tests.TestSupport;
+
+namespace SoulsAiStudio.Core.Tests.Lua;
+
+public class ComboSequenceTests
+{
+    private static IReadOnlyList<ComboNode> Build(string src, string goal) =>
+        ComboSequence.Build(src, GoalOutline.Build(src).Single(g => g.Name == goal));
+
+    [Fact]
+    public void Kengeki03_FromUserExample_RandomBranch5050()
+    {
+        const string src = """
+            Goal.Kengeki03 = function(f59_arg0, f59_arg1, f59_arg2)
+                local f45_local7 = f59_arg0:GetRandam_Int(1, 100)
+                f59_arg1:ClearSubGoal()
+                f59_arg1:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3002, TARGET_ENE_0, 9999, 0, 0)
+                if f45_local7 <= 50 then
+                    f59_arg1:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3016, TARGET_ENE_0, 9999, 0, 0)
+                else
+                    f59_arg1:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3048, TARGET_ENE_0, 9999, 0, 0)
+                end
+            end
+            """;
+        var nodes = Build(src, "Kengeki03");
+        var branch = Assert.Single(ComboSequence.Branches(nodes));
+        Assert.Equal([50d, 50d], branch.Arms.Select(a => a.Probability!.Value));
+        Assert.Equal([3002, 3016], ComboSequence.Flatten(nodes, _ => 0).Select(s => s.AnimId));
+        Assert.Equal([3002, 3048], ComboSequence.Flatten(nodes, _ => 1).Select(s => s.AnimId));
+        Assert.All(ComboSequence.Flatten(nodes, _ => 0), s => Assert.Equal("GOAL_COMMON_ComboRepeat", s.GoalType));
+    }
+
+    [Fact]
+    public void FourWayRandom_NoElse_And_NonRandomCondition()
+    {
+        const string src = """
+            Goal.X = function(a, ai, goal)
+                local r = ai:GetRandam_Int(1, 100)
+                if r <= 25 then goal:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3037, TARGET_ENE_0, 999, 0, 0)
+                elseif r <= 50 then goal:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3018, TARGET_ENE_0, 999, 0, 0)
+                elseif r <= 75 then goal:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3047, TARGET_ENE_0, 999, 0, 0)
+                end
+                if ai:GetNinsatsuNum() <= 1 then
+                    goal:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 3044, TARGET_ENE_0, 999, 0, 0)
+                end
+                while false do goal:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 9999, TARGET_ENE_0, 999, 0, 0) end
+                goal:AddSubGoal(GOAL_COMMON_Wait, 1, TARGET_ENE_0)
+            end
+            """;
+        var branches = ComboSequence.Branches(Build(src, "X")).ToList();
+        Assert.Equal(2, branches.Count);
+        Assert.Equal([25d, 25d, 25d, 25d], branches[0].Arms.Select(a => a.Probability!.Value));
+        Assert.Equal("(no branch taken)", branches[0].Arms[^1].Condition);
+        Assert.All(branches[1].Arms, a => Assert.Null(a.Probability));
+        Assert.Contains("GetNinsatsuNum", branches[1].Arms[0].Condition);
+        // Loop body skipped; Wait has no literal anim.
+        Assert.Equal([3047, 3044], ComboSequence.Flatten(Build(src, "X"), b => b.Line == branches[0].Line ? 2 : 0).Select(s => s.AnimId));
+    }
+
+    [Fact]
+    public void ClearSubGoal_ResetsQueuedSteps()
+    {
+        const string src = """
+            Goal.Y = function(a, ai, goal)
+                goal:AddSubGoal(GOAL_COMMON_Attack, 10, 3000, TARGET_ENE_0, 0, 0)
+                goal:ClearSubGoal()
+                goal:AddSubGoal(GOAL_COMMON_Attack, 10, 3001, TARGET_ENE_0, 0, 0)
+            end
+            """;
+        Assert.Equal([3001], ComboSequence.Flatten(Build(src, "Y"), _ => 0).Select(s => s.AnimId));
+    }
+
+    [RequiresTestDataFact]
+    public void Owl_EveryGoal_BuildsWithoutThrowing_AndActsHaveSteps()
+    {
+        string src = File.ReadAllText(Samples.OwlBattle);
+        var goals = GoalOutline.Build(src);
+        foreach (var g in goals)
+        {
+            var nodes = ComboSequence.Build(src, g);
+            var flat = ComboSequence.Flatten(nodes, _ => 0);
+            Assert.All(flat, s => Assert.InRange(s.Line, g.Line, g.EndLine));
+        }
+        var act50 = ComboSequence.Build(src, goals.Single(x => x.Name == "Act50"));
+        Assert.Equal([3041], ComboSequence.Flatten(act50, _ => 0).Select(s => s.AnimId));
+    }
+}

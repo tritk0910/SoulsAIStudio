@@ -12,7 +12,7 @@ namespace SoulsAiStudio.App
     /// </summary>
     public sealed class SasLayout
     {
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
         public const string ScriptsWindow = "Scripts##sas_scripts";
         public const string EditorWindow = "Lua Editor##sas_editor";
 
@@ -45,13 +45,24 @@ namespace SoulsAiStudio.App
             if (!_requested && settings.LayoutVersion >= CurrentVersion) return;
             if (!_dsasDockIds.TryGetValue("Animations", out uint animNode) || animNode == 0) return;
             if (!_dsasDockIds.TryGetValue("Graph", out uint graphNode) || graphNode == 0) return;
+            _dsasDockIds.TryGetValue("Parameters", out uint paramsNode);
 
-            // Split the Animations node: existing windows stay on top, Scripts gets the bottom 55%.
-            igDockBuilderSplitNode(animNode, ImGuiDir.Down, 0.55f, out uint bottom, out uint _);
-            igDockBuilderDockWindow(ScriptsWindow, bottom);
-            igDockBuilderDockWindow(EditorWindow, graphNode);
-            igDockBuilderFinish(animNode);
-            igDockBuilderFinish(graphNode);
+            if (_requested || settings.LayoutVersion < 1)
+            {
+                // v1: split the Animations node (existing windows stay on top, Scripts gets the bottom 55%),
+                // Lua Editor as a tab next to Graph.
+                igDockBuilderSplitNode(animNode, ImGuiDir.Down, 0.55f, out uint bottom, out uint _);
+                igDockBuilderDockWindow(ScriptsWindow, bottom);
+                igDockBuilderDockWindow(EditorWindow, graphNode);
+                igDockBuilderFinish(animNode);
+                igDockBuilderFinish(graphNode);
+            }
+            // v2: Combo player as a tab next to Parameters / Log.
+            if (paramsNode != 0)
+            {
+                igDockBuilderDockWindow(ComboPanel.WindowName, paramsNode);
+                igDockBuilderFinish(paramsNode);
+            }
 
             settings.LayoutVersion = CurrentVersion;
             settings.Save();

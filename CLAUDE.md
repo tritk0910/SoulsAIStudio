@@ -310,7 +310,7 @@ Kiến trúc DSAS cần biết (chi tiết: `docs/review/dsas-architecture.md`):
 - Font: DSAS lấy glyph range từ font debug DS3 → tiếng Việt hiện `?`. Font trong `Content/Fonts` có đủ glyph → thêm 4 glyph range là xong.
 
 Quy ước code mới (đã chốt):
-1. `SoulsAiStudio.Core` giữ `net9.0`, chỉ tham chiếu SoulsFormats, không UI. Code UI đặt trong `DSAnimStudioNETCore/SoulsAiStudio/` (namespace `SoulsAiStudio.App`), chưa tách app project riêng.
+1. `SoulsAiStudio.Core` giữ `net9.0`, chỉ tham chiếu SoulsFormats, không UI. Code UI đặt trong `SoulsAIStudio/SoulsAiStudio/` (namespace `SoulsAiStudio.App`), chưa tách app project riêng.
 2. Chỉ một thư mục adapter **`DsasBridge`** được đụng tới `zzz_*`, `Main.*`, `OSD.*`; nó implement interface do Core định nghĩa → Core test bằng fake.
 3. Mỗi chỗ sửa trong file DSAS là **một dòng gọi vào class `SasHooks`**, đánh dấu `// [SAS]`. Mục tiêu < 15 dòng sửa DSAS cho P0–P1.5.
 4. Một object khởi động sở hữu mọi service, truyền qua constructor; **không thêm static mới**.
@@ -388,11 +388,12 @@ Nguyên tắc:
 
 ## 8. Repo, build / run
 - Repo này là clone của `https://github.com/Meowmaritus/DSAnimStudio` (remote `upstream`), làm việc trên branch **`sas/main`**. Submodule `SoulsAssetPipeline` (SoulsFormats, Havoc) đã init. Submodule `MeowDSIO` không dùng.
+- App/project đã đổi tên: thư mục `SoulsAIStudio/` (trước là `DSAnimStudioNETCore/`), `SoulsAIStudio/SoulsAIStudio.csproj`, `SoulsAIStudio.sln`, exe `Souls AI Studio.exe`, icon `SoulsAIStudio/SoulsAIStudio_Icon.ico`. **Namespace C# của code DSAS vẫn là `DSAnimStudio`** (đổi namespace = sửa hàng nghìn file, phá merge upstream).
 - **License: GPLv3** (theo DSAS) → toàn bộ fork là GPLv3.
-- DSAS app: `DSAnimStudioNETCore/` (net9.0-windows7.0). Code mới: `src/SoulsAiStudio.Core` (net9.0), test: `tests/SoulsAiStudio.Core.Tests` (xUnit). Cả hai nằm trong solution folder `SoulsAiStudio` của `DSAnimStudioNETCore.sln`.
-- Máy dev đã cài cả .NET 9 và .NET 10 runtime. Vẫn giữ `RollForward=LatestMajor` (test project + `DSAnimStudioNETCore/runtimeconfig.template.json`) để chạy được trên máy chỉ có .NET 10. Không retarget sang net10 (phải sửa submodule SoulsAssetPipeline).
+- DSAS app: `SoulsAIStudio/` (net9.0-windows7.0). Code mới: `src/SoulsAiStudio.Core` (net9.0), test: `tests/SoulsAiStudio.Core.Tests` (xUnit). Cả hai nằm trong solution folder `SoulsAiStudio` của `SoulsAIStudio.sln`.
+- Máy dev đã cài cả .NET 9 và .NET 10 runtime. Vẫn giữ `RollForward=LatestMajor` (test project + `SoulsAIStudio/runtimeconfig.template.json`) để chạy được trên máy chỉ có .NET 10. Không retarget sang net10 (phải sửa submodule SoulsAssetPipeline).
 ```
-dotnet build DSAnimStudioNETCore/DSAnimStudioNETCore.csproj   # DSAS (≈4000 warning có sẵn từ upstream, 0 error)
+dotnet build SoulsAIStudio/SoulsAIStudio.csproj   # DSAS (≈4000 warning có sẵn từ upstream, 0 error)
 dotnet test tests/SoulsAiStudio.Core.Tests
 ```
 - Tài liệu nhóm: `docs/review/` (code review), `docs/testing/` (test plan), `docs/perf/` (benchmark + budget), `docs/ux/` (UI spec). Benchmark: `tools/SoulsAiStudio.Bench/`.
@@ -443,8 +444,8 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 ## 11. Thứ tự bắt tay vào làm
 1. ~~Fork DSAS, build~~ (xong: clone + branch `sas/main`, build xanh). Còn: chạy thử app với Sekiro.
 2. ~~Đọc code DSAS, chốt `[TBD]`~~ (xong phần lớn — xem `docs/review/`, `docs/ux/`).
-3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `DSAnimStudioNETCore/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). Còn: file watcher.
-   - Mở thẳng project: `"Souls AI Studio.exe" --sas-project <file.sasproj>` (exe: `DSAnimStudioNETCore/bin/Release/net9.0-windows7.0/Souls AI Studio.exe`). Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
+3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `SoulsAIStudio/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). Còn: file watcher.
+   - Mở thẳng project: `"Souls AI Studio.exe" --sas-project <file.sasproj>` (exe: `SoulsAIStudio/bin/Release/net9.0-windows7.0/Souls AI Studio.exe`). Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
 4. Prototype **Lua editor trong ImGui** (rủi ro lớn nhất) + đọc/ghi luabnd Sekiro.
 5. Entity browser + resolve param chain (NpcParam → NpcThinkParam → Lua; BehaviorParam → AtkParam/SpEffect).
 6. Khóa TAE editor theo whitelist (P1.5).

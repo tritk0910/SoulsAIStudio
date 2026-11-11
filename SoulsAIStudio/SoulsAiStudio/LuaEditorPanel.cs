@@ -115,7 +115,7 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(340, 60), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(vp.WorkSize.X * 0.55f, vp.WorkSize.Y - 120), ImGuiCond.FirstUseEver);
             bool focused = false;
-            bool visible = ImGui.Begin("Lua Editor##sas_editor", ref IsOpen, ImGuiWindowFlags.NoCollapse);
+            bool visible = Theme.BeginOpaque("Lua Editor##sas_editor", ref IsOpen, ImGuiWindowFlags.NoCollapse);
             try
             {
                 if (visible)
@@ -210,7 +210,7 @@ namespace SoulsAiStudio.App
             foreach (var a in o.AnimsByLine[line])
             {
                 if (ImGui.SmallButton($"▶ {a.AnimId}##play{a.AnimId}")) _app.PlayAnim(a.AnimId);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{a.GoalType}: show anim a000_{a.AnimId:D6} in the timeline/viewport");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{a.GoalType}: play anim a000_{a.AnimId:D6} in the viewport");
                 ImGui.SameLine();
             }
             ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+G go to line · Ctrl+S save");

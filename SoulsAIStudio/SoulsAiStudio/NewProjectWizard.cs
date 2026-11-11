@@ -55,7 +55,7 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + vp.WorkSize * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
             ImGui.SetNextWindowSize(new Vector2(900, 680), ImGuiCond.Appearing);
             bool focused = false;
-            bool visible = ImGui.Begin("New Project##sas_wizard", ref _open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
+            bool visible = Theme.BeginOpaque("New Project##sas_wizard", ref _open, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
             try
             {
             if (visible)

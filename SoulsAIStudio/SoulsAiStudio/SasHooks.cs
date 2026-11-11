@@ -24,7 +24,7 @@ namespace SoulsAiStudio.App
         public const string AppVersion = "0.1";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
-        public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion} (based on DS Anim Studio {dsasVersion})";
+        public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
 
         /// <summary>Called from <c>OSD.Build</c> after DSAS windows; draws our windows.</summary>
         public static void BuildWindows(ref bool anyFieldFocused)

@@ -21,7 +21,7 @@ namespace SoulsAiStudio.App
             ImGui.SetNextWindowPos(vp.WorkPos + vp.WorkSize * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
             ImGui.SetNextWindowSize(new Vector2(620, 420), ImGuiCond.Appearing);
             bool focused = false;
-            bool visible = ImGui.Begin("Souls AI Studio##sas_start", ref IsOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
+            bool visible = Theme.BeginOpaque("Souls AI Studio##sas_start", ref IsOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
             try
             {
             if (visible)
@@ -67,6 +67,17 @@ namespace SoulsAiStudio.App
 
     internal static class Theme
     {
+        /// <summary>Opaque window background (DSAS makes unfocused windows 65% transparent).</summary>
+        public static readonly Vector4 WindowBg = new(0.15f, 0.15f, 0.15f, 1f);
+
+        /// <summary><c>ImGui.Begin</c> with a fully opaque background.</summary>
+        public static bool BeginOpaque(string name, ref bool open, ImGuiWindowFlags flags)
+        {
+            ImGui.PushStyleColor(ImGuiCol.WindowBg, WindowBg);
+            try { return ImGui.Begin(name, ref open, flags); }
+            finally { ImGui.PopStyleColor(); }
+        }
+
         public static readonly Vector4 Accent = new(0.95f, 0.66f, 0.25f, 1f);
         public static readonly Vector4 Dim = new(0.55f, 0.55f, 0.55f, 1f);
         public static readonly Vector4 Ok = new(0.45f, 0.85f, 0.45f, 1f);

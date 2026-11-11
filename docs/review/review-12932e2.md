@@ -11,7 +11,7 @@ Legend: **[MUST]** fix before the next user-facing build · **[SHOULD]** fix soo
 ## Must-fix
 
 ### M1. A blocked TAE save still writes into the game folder and marks the work as saved
-`DSAnimStudioNETCore/TaeEditor/TaeFileContainer.cs:715` (hook) and `TaeEditor/TaeEditorScreen.cs:1230-1260` (caller)
+`SoulsAIStudio/TaeEditor/TaeFileContainer.cs:715` (hook) and `TaeEditor/TaeEditorScreen.cs:1230-1260` (caller)
 
 **Problem.** `SasHooks.WriteBinder` runs at the very end of the save. By that point DSAS has already done the following:
 - written `_DSAS_WORKSPACE.json` (`SaveProjectJson()`, `TaeEditorScreen.cs:1235`)

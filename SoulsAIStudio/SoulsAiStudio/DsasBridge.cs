@@ -1,7 +1,9 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using DSAnimStudio;
+using DSAnimStudio.TaeEditor;
 using SoulsAiStudio.Core.IO;
 using SoulsAiStudio.Core.Project;
 
@@ -68,7 +70,84 @@ namespace SoulsAiStudio.App
         {
             var doc = zzz_DocumentManager.CurrentDocument;
             if (doc?.EditorScreen == null || !doc.EditorScreen.IsFileOpen) return false;
-            return doc.EditorScreen.GotoAnimID(SplitAnimID.FromFullID(doc.GameRoot, animId), true, false, out var found) && found != null;
+            if (!doc.EditorScreen.GotoAnimID(SplitAnimID.FromFullID(doc.GameRoot, animId), true, false, out var found) || found == null)
+                return false;
+            doc.EditorScreen.Graph?.ViewportInteractor?.CancelCombo();
+            var cursor = doc.EditorScreen.PlaybackCursor;
+            if (cursor != null) { cursor.CurrentTime = 0; cursor.IsPlaying = true; } // play right away (user request)
+            return true;
+        }
+
+        /// <summary>One played combo step and where it was cut.</summary>
+        public sealed record ComboPlan(int AnimId, float EndFrame, float TotalFrames, string CutReason, bool Missing);
+
+        /// <summary>FlagType of the Sekiro JumpTable event (TAE type 0) "End If AI ComboAttack Queued".</summary>
+        public const int JumpTableEventType = 0, ComboAttackQueuedFlag = 23;
+
+        /// <summary>
+        /// Plays <paramref name="animIds"/> back to back with DSAS's combo player. Every anim except the last is cut at the
+        /// start of its "End If AI ComboAttack Queued" window (where the AI's queued ComboRepeat/ComboFinal takes over),
+        /// or at its end when it has no such window. Returns what was planned (for display), or null if nothing is loaded.
+        /// </summary>
+        public List<ComboPlan>? PlayCombo(IReadOnlyList<int> animIds)
+        {
+            var doc = zzz_DocumentManager.CurrentDocument;
+            var screen = doc?.EditorScreen;
+            var interactor = screen?.Graph?.ViewportInteractor;
+            var container = interactor?.CurrentModel?.AnimContainer;
+            if (screen == null || !screen.IsFileOpen || interactor == null || container == null || screen.Proj == null) return null;
+
+            float snap = TaeExtensionMethods.GetCurrentSnapInterval();
+            var plans = new List<ComboPlan>();
+            var entries = new List<NewCombo.Entry>();
+            for (int k = 0; k < animIds.Count; k++)
+            {
+                var id = SplitAnimID.FromFullID(doc!.GameRoot, animIds[k]);
+                var taeAnim = screen.Proj.SAFE_GetFirstAnimationFromFullID(id);
+                var hkx = taeAnim == null ? null : container.FindAnimation(taeAnim.GetHkxID(screen.Proj), returnNewInstance: false);
+                if (taeAnim == null || hkx == null)
+                {
+                    plans.Add(new ComboPlan(animIds[k], 0, 0, "not in this anibnd", Missing: true));
+                    continue;
+                }
+
+                float total = Math.Max(1, hkx.FrameCount - 1);
+                float end = total;
+                string reason = "anim end";
+                if (k < animIds.Count - 1)
+                {
+                    foreach (var act in taeAnim.SAFE_GetActions())
+                    {
+                        if (act.Type != JumpTableEventType || act.ParameterBytes == null || act.ParameterBytes.Length < 4) continue;
+                        if (BitConverter.ToInt32(act.ParameterBytes, 0) != ComboAttackQueuedFlag) continue;
+                        float f = act.StartTime / snap;
+                        if (f < end) { end = f; reason = "ComboAttack Queued"; }
+                    }
+                }
+                plans.Add(new ComboPlan(animIds[k], end, total, reason, Missing: false));
+                entries.Add(new NewCombo.Entry { AnimationID = id, StartFrame = 0, EndFrame = end, BlendDuration = -1, IsLoop = false });
+            }
+
+            if (entries.Count == 0) return plans;
+            if (screen.PlaybackCursor != null) screen.PlaybackCursor.IsPlaying = false;
+            interactor.RequestCombo(entries);
+            return plans;
+        }
+
+        public void StopCombo() => Safe(() => { zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.CancelCombo(); return ""; });
+
+        /// <summary>Index of the combo entry playing now, or -1.</summary>
+        public int ComboIndex
+        {
+            get
+            {
+                try
+                {
+                    var c = zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.Combo;
+                    return c != null && c.PlaybackState == NewCombo.PlaybackStates.Playing ? c.CurrentIndex : -1;
+                }
+                catch (Exception) { return -1; }
+            }
         }
 
         private static T? Safe<T>(Func<T?> f) where T : class

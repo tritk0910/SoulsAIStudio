@@ -17,7 +17,7 @@ public static class TestPaths
     private static readonly Lazy<string?> _repoRoot = new(FindRepoRoot);
     private static readonly Lazy<string?> _original = new(FindOriginal);
 
-    /// <summary>Repo root (folder containing tests/SoulsAiStudio.Core.Tests or DSAnimStudioNETCore.sln), or null if not found.</summary>
+    /// <summary>Repo root (folder containing tests/SoulsAiStudio.Core.Tests or SoulsAIStudio.sln), or null if not found.</summary>
     public static string? RepoRoot => _repoRoot.Value;
 
     /// <summary><c>test-data/original</c> (READ-ONLY backup), or null if missing.</summary>
@@ -66,7 +66,7 @@ public static class TestPaths
         while (dir is not null)
         {
             if (Directory.Exists(Path.Combine(dir.FullName, "tests", "SoulsAiStudio.Core.Tests"))
-                || File.Exists(Path.Combine(dir.FullName, "DSAnimStudioNETCore.sln")))
+                || File.Exists(Path.Combine(dir.FullName, "SoulsAIStudio.sln")))
                 return dir.FullName;
             if (Directory.Exists(Path.Combine(dir.FullName, "test-data", "original")))
                 return dir.FullName;
