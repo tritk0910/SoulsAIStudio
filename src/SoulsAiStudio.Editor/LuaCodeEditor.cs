@@ -42,6 +42,10 @@ public sealed class LuaCodeEditor
     long _lastVersion = -1;
     Coordinates _lastCursor;
     bool _textWindowFocused;
+    bool _lastEditorFocused;
+    int _enterCooldown; // frames during which an Enter from the OTHER source (key vs typed CR) is ignored
+    bool _lastEnterWasChar;
+    int _lastTypedCount;
 
     FocusTarget _target = FocusTarget.Text;
     bool _findOpen;
@@ -174,10 +178,14 @@ public sealed class LuaCodeEditor
         ImGui.PushStyleColor(ImGuiCol.ChildBg, _view.Palette.Background);
         if (ImGui.BeginChild("##outer", size, false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoMove))
         {
-            bool editorFocused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows) || _focusRequested;
+            // Root+children: the editor keeps the keyboard when the host focuses its window (e.g. DSAS docking /
+            // SetWindowFocus on the panel) rather than our child, which otherwise silently dropped typed chars.
+            bool editorFocused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) || _focusRequested;
+            _lastEditorFocused = editorFocused;
             float lineH = _metrics.LineHeight;
             var avail = ImGui.GetContentRegionAvail();
-            ProcessKeys(KeyInput, editorFocused, _textWindowFocused, (int)MathF.Max(1, avail.Y / lineH - 2));
+            bool textKeys = editorFocused && !ImGui.IsAnyItemActive();
+            ProcessKeys(KeyInput, editorFocused, textKeys, (int)MathF.Max(1, avail.Y / lineH - 2));
 
             if (_findOpen)
                 DrawFindBar();
@@ -192,7 +200,7 @@ public sealed class LuaCodeEditor
             ImGui.EndChild();
             ImGui.PopStyleVar();
 
-            focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows);
+            focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
         }
         ImGui.EndChild();
         ImGui.PopStyleColor();
@@ -222,22 +230,22 @@ public sealed class LuaCodeEditor
     internal void ProcessKeys(IKeyInput k, bool editorFocused, bool textFocused, int pageLines)
     {
         int n = k.ReadTypedChars(_typed); // always drain, so stale chars never leak into the next focus
+        _lastTypedCount = n;
+        bool enterCooling = _enterCooldown > 0;
+        if (_enterCooldown > 0)
+            _enterCooldown--;
         if (!editorFocused)
             return;
 
         bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
         var chars = _typed.AsSpan(0, n);
 
+        // Ctrl+F / Ctrl+G switch the target; chars typed later in the same frame (fast typists, SendKeys)
+        // continue into the newly opened field instead of being dropped.
         if (ctrl && !alt && k.IsPressed(EditorKey.F))
-        {
             OpenFind();
-            return;
-        }
-        if (ctrl && !alt && k.IsPressed(EditorKey.G))
-        {
+        else if (ctrl && !alt && k.IsPressed(EditorKey.G))
             OpenGoto();
-            return;
-        }
         if (k.IsPressed(EditorKey.F3))
             FindStep(!shift);
         if (k.IsPressed(EditorKey.Escape) && (_findOpen || _gotoOpen))
@@ -252,13 +260,13 @@ public sealed class LuaCodeEditor
         switch (_target)
         {
             case FocusTarget.Find:
-                if (FeedField(_findField, k, chars))
+                if (FeedField(_findField, k, chars, enterCooling))
                     FindStep(!shift);
                 SyncFindQuery();
                 break;
 
             case FocusTarget.Goto:
-                if (FeedField(_gotoField, k, chars))
+                if (FeedField(_gotoField, k, chars, enterCooling))
                 {
                     int value = _gotoField.ParseInt();
                     _gotoOpen = false;
@@ -272,13 +280,17 @@ public sealed class LuaCodeEditor
 
             default:
                 if (textFocused)
-                    HandleTextKeys(k, chars, pageLines);
+                    HandleTextKeys(k, chars, pageLines, enterCooling);
                 break;
         }
     }
 
-    /// <summary>Edits a bar field. Returns true when Enter was pressed.</summary>
-    bool FeedField(LineInput field, IKeyInput k, ReadOnlySpan<char> chars)
+    /// <summary>
+    /// Edits a bar field. Returns true when Enter was pressed: either the Enter key or a typed CR/LF char
+    /// (hosts that poll key state can miss a short Enter press, but WM_CHAR CR still arrives). One Enter per
+    /// frame; the other source is then ignored for a few frames so it can't fire twice.
+    /// </summary>
+    bool FeedField(LineInput field, IKeyInput k, ReadOnlySpan<char> chars, bool enterCooling)
     {
         bool ctrl = k.Ctrl, alt = k.Alt;
         if (ctrl && !alt)
@@ -301,14 +313,33 @@ public sealed class LuaCodeEditor
         if (k.IsPressed(EditorKey.Home)) field.Home();
         if (k.IsPressed(EditorKey.End)) field.End();
 
-        if (!ctrl || alt)
-            foreach (var c in chars)
-                field.Insert(c); // control chars ('\r', '\b', ...) are ignored by the field
+        // Printable chars are accepted even if Ctrl reads as held: WM_CHAR only yields printable chars for
+        // keys typed without Ctrl (Ctrl+letter gives control codes), and polled modifier state can lag a frame.
+        bool enterChar = false;
+        foreach (var c in chars)
+        {
+            if (c == '\r' || c == '\n')
+            {
+                enterChar = true;
+                break; // anything after Enter belongs to whatever has focus next
+            }
+            field.Insert(c); // other control chars are ignored by the field
+        }
 
-        return !ctrl && k.IsPressed(EditorKey.Enter);
+        bool enterKey = !ctrl && k.IsPressed(EditorKey.Enter);
+        if (!enterChar && !enterKey)
+            return false;
+        // One physical press can show up as key AND typed CR, possibly a frame apart. While cooling down,
+        // only accept Enter from the same source as the previous one (so repeated presses still work).
+        bool fromChar = enterChar && !(enterKey && enterCooling && !_lastEnterWasChar);
+        if (enterCooling && fromChar != _lastEnterWasChar)
+            return false;
+        _lastEnterWasChar = fromChar;
+        _enterCooldown = 3;
+        return true;
     }
 
-    void HandleTextKeys(IKeyInput k, ReadOnlySpan<char> chars, int pageLines)
+    void HandleTextKeys(IKeyInput k, ReadOnlySpan<char> chars, int pageLines, bool enterCooling)
     {
         bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
 
@@ -334,16 +365,14 @@ public sealed class LuaCodeEditor
             if (k.IsPressed(EditorKey.End)) { if (ctrl) _core.MoveToEndOfFile(shift); else _core.MoveEnd(shift); }
             if (k.IsPressed(EditorKey.Backspace)) _core.Backspace(ctrl);
             if (k.IsPressed(EditorKey.Delete)) _core.Delete(ctrl);
-            if (!ctrl && k.IsPressed(EditorKey.Enter)) _core.TypeChar('\n');
+            if (!ctrl && !(enterCooling && _lastEnterWasChar) && k.IsPressed(EditorKey.Enter)) _core.TypeChar('\n');
             if (!ctrl && k.IsPressed(EditorKey.Tab)) _core.Tab(shift);
         }
 
-        if (!ctrl || alt) // Ctrl+Alt = AltGr on European layouts
-        {
-            foreach (var c in chars)
-                if (c >= 32 && c != 127)
-                    _core.TypeChar(c);
-        }
+        // Printable chars only come from keys typed without Ctrl (see FeedField), so no Ctrl gating here.
+        foreach (var c in chars)
+            if (c >= 32 && c != 127)
+                _core.TypeChar(c);
     }
 
     void OpenFind()
@@ -421,7 +450,7 @@ public sealed class LuaCodeEditor
             ContentOrigin = origin,
             WindowPos = winPos,
             WindowSize = visible,
-            Focused = textFocused && _target == FocusTarget.Text,
+            Focused = (textFocused || _lastEditorFocused) && _target == FocusTarget.Text,
             HighlightLine = _highlightLine,
             ShowFindMatches = _findOpen && _find.HasQuery,
             CurrentMatchStart = _core.SelectionStart,
@@ -698,6 +727,11 @@ public sealed class LuaCodeEditor
         if (ImGui.Button("x##closegoto"))
             CloseBars();
     }
+
+    /// <summary>One-line input-routing state for host diagnostics (allocates; call only when debugging).</summary>
+    public string DebugState =>
+        $"target={_target} find={_findOpen} goto={_gotoOpen} findText='{new string(_findField.Text)}' gotoText='{new string(_gotoField.Text)}' " +
+        $"editorFocused={_lastEditorFocused} textWindowFocused={_textWindowFocused} typedLastFrame={_lastTypedCount} enterCooldown={_enterCooldown}";
 
     // ================================================================= test hooks
 

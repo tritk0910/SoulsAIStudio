@@ -68,6 +68,9 @@ namespace SoulsAiStudio.App
 
         public LuaEditorPanel(SasApp app) => _app = app;
 
+        /// <summary>Set SAS_DEBUG=1 to show the editor's internal input state (diagnostics only).</summary>
+        private static readonly bool DebugEditor = Environment.GetEnvironmentVariable("SAS_DEBUG") == "1";
+
         public ProjectScript? ActiveScript => _active?.Script;
         public OpenScript? Active => _active;
         public bool AnyDirty => _open.Any(o => o.IsDirty);
@@ -109,7 +112,7 @@ namespace SoulsAiStudio.App
             _keys.NewFrame();
             VisibleInDockId = 0;
             foreach (var o in _open) PollTasks(o);
-            if (!IsOpen) return false;
+            if (!IsOpen) { ImeGuard.SetEditorFocused(DSAnimStudio.Main.WinForm?.Handle ?? IntPtr.Zero, false, true); return false; }
 
             var vp = ImGui.GetMainViewport();
             ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(340, 60), ImGuiCond.FirstUseEver);
@@ -129,6 +132,7 @@ namespace SoulsAiStudio.App
                 }
             }
             finally { ImGui.End(); } // keep ImGui's stack balanced even if a panel throws
+            ImeGuard.SetEditorFocused(DSAnimStudio.Main.WinForm?.Handle ?? IntPtr.Zero, focused, _app.Settings.AllowImeInEditor);
             return focused;
         }
 
@@ -172,6 +176,7 @@ namespace SoulsAiStudio.App
             BuildBreadcrumb(o);
             BuildStatusLine(o);
             o.Editor.SetHighlightLine(o.GoalAtCursor?.Line);
+            if (DebugEditor) ImGui.TextColored(Theme.Warn, o.Editor.DebugState.Replace('\n', ' '));
             return o.Editor.Render("##sas_code", new Vector2(-1, -1));
         }
 

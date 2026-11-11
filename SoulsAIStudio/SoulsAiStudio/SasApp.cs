@@ -176,6 +176,7 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Scripts Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
+            if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
             if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = _combo.IsOpen = true; Layout.RequestApply(); }
             ImGui.EndMenu();
         }

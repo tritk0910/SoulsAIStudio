@@ -307,6 +307,7 @@ Kiến trúc DSAS cần biết (chi tiết: `docs/review/dsas-architecture.md`):
 - Param: DSAS load `GameParam.parambnd.dcx` của Sekiro (mod folder trước) nhưng bằng reader offset viết tay, thiếu `spEffectId0..4` của AtkParam, không đọc SpEffectParam cho Sekiro, không có Bullet/NpcThinkParam → **Core tự viết loader dựa trên paramdef** (Paramdex). Port 2 công thức ID từ `zzz_ParamManagerIns.cs`.
 - Hitbox: `TaeActionSimulationEnvironment.cs` (event 1, 5, 304, 307) → `NewDummyPolyManager`. Range ring: hook `DBG.DrawPrimitives`.
 - Live refresh của DSAS cho Sekiro chỉ reload chr qua memory injection (địa chỉ cứng theo 1 bản exe), không reload Lua.
+- **Nhập liệu cho Lua editor** (`SoulsAIStudio/SoulsAiStudio/DsasKeyInput.cs`): ký tự lấy từ `WM_CHAR` qua `NativeWindow` (KeyPress của WinForms bắn 2 lần khi có IME vì cả `WM_IME_CHAR` lẫn `WM_CHAR`; `io.InputQueueCharacters` của ImGui.NET 1.87 đọc ra rỗng). IME của Windows bị tắt khi editor có focus (composition không vẽ được → chữ hiện trễ), bật lại bằng menu Souls AI → "Allow Windows IME in Lua Editor". Unikey vẫn gõ được. `SAS_DEBUG=1` hiện trạng thái input của editor.
 - Font: DSAS lấy glyph range từ font debug DS3 → tiếng Việt hiện `?`. Font trong `Content/Fonts` có đủ glyph → thêm 4 glyph range là xong.
 
 Quy ước code mới (đã chốt):

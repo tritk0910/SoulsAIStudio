@@ -214,4 +214,101 @@ public class FindBarTests
             Step(e, idle);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
+
+    // ---------------------------------------------------------------- go-to line (bug: "2523{ENTER}" -> only "2")
+
+    static (LuaCodeEditor Editor, FakeKeys Keys, string Text) SetupLong()
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < 3000; i++)
+            sb.Append("line ").Append(i + 1).Append('\n');
+        var e = new LuaCodeEditor { Clipboard = new MemoryClipboard() };
+        e.Text = sb.ToString();
+        return (e, new FakeKeys(), sb.ToString());
+    }
+
+    static void AssertJumpedTo2523(LuaCodeEditor e, string text)
+    {
+        Assert.False(e.GotoOpen);
+        Assert.Equal(LuaCodeEditor.FocusTarget.Text, e.Target);
+        Assert.Equal((2522, 0), e.Cursor);
+        Assert.Equal(text, e.Text);
+    }
+
+    [Fact]
+    public void Goto_DigitsInSeparateFrames_ThenEnterKey()
+    {
+        var (e, k, text) = SetupLong();
+        Step(e, k.Frame("\a", ctrl: true, keys: EditorKey.G)); // WM_CHAR of Ctrl+G is BEL
+        foreach (var c in "2523")
+            Step(e, k.Frame(c.ToString()));
+        Assert.Equal("2523", e.GotoField.Text.ToString());
+        Step(e, k.Frame(keys: EditorKey.Enter));
+        AssertJumpedTo2523(e, text);
+    }
+
+    [Fact]
+    public void Goto_DigitsInSeparateFrames_EnterOnlyAsTypedCr()
+    {
+        // Host polled the key state too late to see Enter; only WM_CHAR '\r' arrived.
+        var (e, k, text) = SetupLong();
+        Step(e, k.Frame(ctrl: true, keys: EditorKey.G));
+        foreach (var c in "2523")
+            Step(e, k.Frame(c.ToString()));
+        Step(e, k.Frame("\r"));
+        AssertJumpedTo2523(e, text);
+    }
+
+    [Fact]
+    public void Goto_EverythingInOneFrame_WithCtrlStillReportedHeld()
+    {
+        var (e, k, text) = SetupLong();
+        Step(e, k.Frame("\a2523\r", ctrl: true, keys: EditorKey.G));
+        AssertJumpedTo2523(e, text);
+    }
+
+    [Fact]
+    public void Goto_DigitsAndEnterKeyInOneFrame()
+    {
+        var (e, k, text) = SetupLong();
+        Step(e, k.Frame(ctrl: true, keys: EditorKey.G));
+        Step(e, k.Frame("2523", keys: EditorKey.Enter));
+        AssertJumpedTo2523(e, text);
+    }
+
+    [Fact]
+    public void Goto_EnterFromBothSources_DoesNotTypeNewlineIntoCode()
+    {
+        var (e, k, text) = SetupLong();
+        Step(e, k.Frame(ctrl: true, keys: EditorKey.G));
+        Step(e, k.Frame("2523\r"));            // WM_CHAR '\r' arrives first
+        Step(e, k.Frame(keys: EditorKey.Enter)); // the polled Enter key shows up a frame later
+        AssertJumpedTo2523(e, text);
+        Step(e, k.Frame("\r", keys: EditorKey.Enter));
+        Assert.Equal(text, e.Text);
+        // after the cooldown, Enter edits the code again
+        Step(e, k.Frame());
+        Step(e, k.Frame(keys: EditorKey.Enter));
+        Assert.NotEqual(text, e.Text);
+    }
+
+    [Fact]
+    public void Find_EnterKeyAndTypedCrSameFrame_StepsOnce()
+    {
+        var (e, k) = Setup();
+        Step(e, k.Frame(ctrl: true, keys: EditorKey.F));
+        Step(e, k.Frame("5060040"));
+        Assert.Equal(2, e.Core.SelectionStart.Line);
+        Step(e, k.Frame("\r", keys: EditorKey.Enter));
+        Assert.Equal(5, e.Core.SelectionStart.Line); // one step, not two (two would wrap back to line 2)
+    }
+
+    [Fact]
+    public void Find_TypingInSameFrameAsCtrlF_GoesToField()
+    {
+        var (e, k) = Setup();
+        Step(e, k.Frame("\u00063012", ctrl: true, keys: EditorKey.F));
+        Assert.Equal("3012", e.FindField.Text.ToString());
+        Assert.Equal(Code, e.Text);
+    }
 }

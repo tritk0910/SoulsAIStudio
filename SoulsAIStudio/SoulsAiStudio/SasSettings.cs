@@ -17,6 +17,8 @@ namespace SoulsAiStudio.App
         public bool ShowStartScreenOnLaunch { get; set; } = true;
         /// <summary>Version of the default dock layout already applied (see <see cref="SasLayout"/>).</summary>
         public int LayoutVersion { get; set; }
+        /// <summary>Keep the Windows IME active in the Lua editor (default off: its composition text isn't drawn).</summary>
+        public bool AllowImeInEditor { get; set; }
 
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the

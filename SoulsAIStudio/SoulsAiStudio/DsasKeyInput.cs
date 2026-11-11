@@ -23,7 +23,7 @@ namespace SoulsAiStudio.App
         private readonly char[] _frameChars = new char[256];
         private int _frameCount;
         private bool _hooked;
-        private int _keyDownsSinceChar;
+        private CharHook? _charHook;
 
         public void NewFrame()
         {
@@ -37,16 +37,10 @@ namespace SoulsAiStudio.App
         private void HookOnce()
         {
             if (_hooked || DSAnimStudio.Main.WinForm == null) return;
-            // After DSAS opens a document, every WM_CHAR arrives twice (seen in the find bar and ImGui's own InputText).
-            // A real character always follows a WM_KEYDOWN (incl. VK_PACKET from IMEs like Unikey), so accept at most one
-            // KeyPress per KeyDown; the duplicate has no key-down of its own and is dropped.
-            DSAnimStudio.Main.WinForm.KeyDown += (_, _) => _keyDownsSinceChar++;
-            DSAnimStudio.Main.WinForm.KeyPress += (_, e) =>
-            {
-                if (_keyDownsSinceChar == 0) return;
-                _keyDownsSinceChar = 0;
-                if (_pending.Count < 1024) _pending.Enqueue(e.KeyChar);
-            };
+            // Read WM_CHAR straight from the window procedure. WinForms' KeyPress fires for BOTH WM_IME_CHAR and the
+            // WM_CHAR that DefWindowProc derives from it, so with a Vietnamese IME (Unikey/Telex) every character
+            // arrived twice. WM_CHAR alone carries each committed character exactly once.
+            _charHook = new CharHook(DSAnimStudio.Main.WinForm.Handle, c => { if (_pending.Count < 1024) _pending.Enqueue(c); });
             _hooked = true;
         }
 
@@ -73,6 +67,46 @@ namespace SoulsAiStudio.App
             int n = Math.Min(_frameCount, destination.Length);
             _frameChars.AsSpan(0, n).CopyTo(destination);
             return n;
+        }
+    }
+
+    /// <summary>
+    /// Turns the Windows IME (e.g. Microsoft Vietnamese Telex) off while the Lua editor has focus. The IME holds
+    /// typed text in a composition string until a word is committed, and the editor can't draw that string, so typing
+    /// looked delayed until Space/Enter. Hook-based tools like Unikey still work (they send plain characters).
+    /// </summary>
+    internal static class ImeGuard
+    {
+        [System.Runtime.InteropServices.DllImport("imm32.dll")] private static extern IntPtr ImmAssociateContext(IntPtr hWnd, IntPtr hIMC);
+        private static IntPtr _saved;
+        private static bool _disabled;
+
+        public static void SetEditorFocused(IntPtr hwnd, bool focused, bool allowIme)
+        {
+            bool wantDisabled = focused && !allowIme;
+            if (wantDisabled == _disabled || hwnd == IntPtr.Zero) return;
+            if (wantDisabled) _saved = ImmAssociateContext(hwnd, IntPtr.Zero);
+            else ImmAssociateContext(hwnd, _saved);
+            _disabled = wantDisabled;
+        }
+    }
+
+    /// <summary>Subclasses the game window to observe WM_CHAR (0x0102) without changing its handling.</summary>
+    internal sealed class CharHook : System.Windows.Forms.NativeWindow
+    {
+        private const int WM_CHAR = 0x0102;
+        private readonly Action<char> _onChar;
+
+        public CharHook(IntPtr handle, Action<char> onChar)
+        {
+            _onChar = onChar;
+            AssignHandle(handle);
+        }
+
+        protected override void WndProc(ref System.Windows.Forms.Message m)
+        {
+            if (m.Msg == WM_CHAR) _onChar((char)(long)m.WParam);
+            base.WndProc(ref m);
         }
     }
 }
