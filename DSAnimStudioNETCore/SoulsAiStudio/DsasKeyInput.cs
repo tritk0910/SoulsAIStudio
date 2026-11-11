@@ -23,6 +23,7 @@ namespace SoulsAiStudio.App
         private readonly char[] _frameChars = new char[256];
         private int _frameCount;
         private bool _hooked;
+        private int _keyDownsSinceChar;
 
         public void NewFrame()
         {
@@ -36,7 +37,16 @@ namespace SoulsAiStudio.App
         private void HookOnce()
         {
             if (_hooked || DSAnimStudio.Main.WinForm == null) return;
-            DSAnimStudio.Main.WinForm.KeyPress += (_, e) => { if (_pending.Count < 1024) _pending.Enqueue(e.KeyChar); };
+            // After DSAS opens a document, every WM_CHAR arrives twice (seen in the find bar and ImGui's own InputText).
+            // A real character always follows a WM_KEYDOWN (incl. VK_PACKET from IMEs like Unikey), so accept at most one
+            // KeyPress per KeyDown; the duplicate has no key-down of its own and is dropped.
+            DSAnimStudio.Main.WinForm.KeyDown += (_, _) => _keyDownsSinceChar++;
+            DSAnimStudio.Main.WinForm.KeyPress += (_, e) =>
+            {
+                if (_keyDownsSinceChar == 0) return;
+                _keyDownsSinceChar = 0;
+                if (_pending.Count < 1024) _pending.Enqueue(e.KeyChar);
+            };
             _hooked = true;
         }
 

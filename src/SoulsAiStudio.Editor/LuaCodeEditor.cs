@@ -1,7 +1,6 @@
 // Parts derived from ImGuiColorTextEditNet (MIT) TextEditor.cs, Editor/TextEditorRenderer.cs and
 // Input/Standard*Input.cs — see THIRD_PARTY_ImGuiColorTextEditNet.md.
 using System.Numerics;
-using System.Text.Unicode;
 using ImGuiNET;
 using SoulsAiStudio.Editor.Input;
 using SoulsAiStudio.Editor.Rendering;
@@ -13,11 +12,15 @@ namespace SoulsAiStudio.Editor;
 /// <summary>
 /// Lua code editor widget for ImGui.NET 1.87 (DSAS). Call <see cref="Render"/> once per frame inside an
 /// ImGui window. Only visible lines are drawn; the steady-state frame does not allocate.
+/// <para>All text entry (code, find field, go-to field) goes through <see cref="IKeyInput"/>; the widget
+/// never uses native ImGui.InputText, so typed chars have exactly one source.</para>
 /// </summary>
 public sealed class LuaCodeEditor
 {
     /// <summary>Lines (re)colorized per frame at most. A 3000-line file colors fully in the first frame.</summary>
     const int ColorizeBudgetPerFrame = 8000;
+
+    internal enum FocusTarget { Text, Find, Goto }
 
     readonly EditorCore _core = new();
     readonly DiagnosticStore _diagnostics = new();
@@ -27,10 +30,9 @@ public sealed class LuaCodeEditor
     readonly ImGuiDrawSink _sink = new();
     readonly ImGuiGlyphMetrics _metrics = new();
 
-    readonly char[] _typed = new char[64];
-    readonly char[] _decoded = new char[256];
-    readonly byte[] _findBuf = new byte[256];
-    readonly byte[] _gotoBuf = new byte[16];
+    readonly char[] _typed = new char[256];
+    readonly LineInput _findField = new(256);
+    readonly LineInput _gotoField = new(9, digitsOnly: true);
 
     int _highlightLine = -1;
     int _scrollCenterLine = -1;
@@ -39,13 +41,14 @@ public sealed class LuaCodeEditor
     double _blinkStart;
     long _lastVersion = -1;
     Coordinates _lastCursor;
+    bool _textWindowFocused;
 
+    FocusTarget _target = FocusTarget.Text;
     bool _findOpen;
-    bool _focusFindInput;
     bool _caseSensitive;
     Coordinates _findOrigin;
+    int _findFieldSeenVersion = -1;
     bool _gotoOpen;
-    bool _focusGotoInput;
     bool _focusTextNextFrame;
 
     long _widthVersion = -1;
@@ -108,6 +111,7 @@ public sealed class LuaCodeEditor
             _core.SetCursor(new Coordinates(line, 0));
         _scrollCenterLine = line;
         _focusRequested = true;
+        _target = FocusTarget.Text;
     }
 
     /// <summary>Replaces all diagnostics. Line/columns are 0-based; IsWarning=false draws as error (red).</summary>
@@ -135,7 +139,7 @@ public sealed class LuaCodeEditor
         _lastVersion = Version;
     }
 
-    /// <summary>Key source; see <see cref="IKeyInput"/> for what DSAS must feed. Default reads ImGui io.</summary>
+    /// <summary>Key and typed-char source; see <see cref="IKeyInput"/> for what DSAS must feed. Default reads ImGui io.</summary>
     public IKeyInput KeyInput { get; set; } = ImGuiKeyInput.Instance;
 
     /// <summary>Clipboard; default goes through ImGui.</summary>
@@ -170,9 +174,10 @@ public sealed class LuaCodeEditor
         ImGui.PushStyleColor(ImGuiCol.ChildBg, _view.Palette.Background);
         if (ImGui.BeginChild("##outer", size, false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoMove))
         {
-            bool outerFocused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows) || _focusRequested;
-            if (outerFocused)
-                HandleBarKeys();
+            bool editorFocused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows) || _focusRequested;
+            float lineH = _metrics.LineHeight;
+            var avail = ImGui.GetContentRegionAvail();
+            ProcessKeys(KeyInput, editorFocused, _textWindowFocused, (int)MathF.Max(1, avail.Y / lineH - 2));
 
             if (_findOpen)
                 DrawFindBar();
@@ -182,6 +187,8 @@ public sealed class LuaCodeEditor
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
             if (ImGui.BeginChild("##text", Vector2.Zero, false, ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoNavInputs))
                 DrawTextArea();
+            else
+                _textWindowFocused = false;
             ImGui.EndChild();
             ImGui.PopStyleVar();
 
@@ -206,6 +213,189 @@ public sealed class LuaCodeEditor
         return focused;
     }
 
+    // ================================================================= keyboard (ImGui-free, unit-tested)
+
+    /// <summary>
+    /// Reads this frame's typed chars once and routes keys + chars to exactly one target:
+    /// the find field, the go-to field, or the text area.
+    /// </summary>
+    internal void ProcessKeys(IKeyInput k, bool editorFocused, bool textFocused, int pageLines)
+    {
+        int n = k.ReadTypedChars(_typed); // always drain, so stale chars never leak into the next focus
+        if (!editorFocused)
+            return;
+
+        bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
+        var chars = _typed.AsSpan(0, n);
+
+        if (ctrl && !alt && k.IsPressed(EditorKey.F))
+        {
+            OpenFind();
+            return;
+        }
+        if (ctrl && !alt && k.IsPressed(EditorKey.G))
+        {
+            OpenGoto();
+            return;
+        }
+        if (k.IsPressed(EditorKey.F3))
+            FindStep(!shift);
+        if (k.IsPressed(EditorKey.Escape) && (_findOpen || _gotoOpen))
+        {
+            CloseBars();
+            return;
+        }
+
+        if (_target == FocusTarget.Find && !_findOpen || _target == FocusTarget.Goto && !_gotoOpen)
+            _target = FocusTarget.Text;
+
+        switch (_target)
+        {
+            case FocusTarget.Find:
+                if (FeedField(_findField, k, chars))
+                    FindStep(!shift);
+                SyncFindQuery();
+                break;
+
+            case FocusTarget.Goto:
+                if (FeedField(_gotoField, k, chars))
+                {
+                    int value = _gotoField.ParseInt();
+                    _gotoOpen = false;
+                    _target = FocusTarget.Text;
+                    if (value > 0)
+                        GoToLine(value - 1);
+                    else
+                        _focusTextNextFrame = true;
+                }
+                break;
+
+            default:
+                if (textFocused)
+                    HandleTextKeys(k, chars, pageLines);
+                break;
+        }
+    }
+
+    /// <summary>Edits a bar field. Returns true when Enter was pressed.</summary>
+    bool FeedField(LineInput field, IKeyInput k, ReadOnlySpan<char> chars)
+    {
+        bool ctrl = k.Ctrl, alt = k.Alt;
+        if (ctrl && !alt)
+        {
+            if (k.IsPressed(EditorKey.A))
+                field.SelectAll();
+            else if (k.IsPressed(EditorKey.C))
+                Clipboard.SetText(new string(field.Text));
+            else if (k.IsPressed(EditorKey.V))
+            {
+                var clip = Clipboard.GetText();
+                if (!string.IsNullOrEmpty(clip))
+                    field.Insert(clip);
+            }
+        }
+        if (k.IsPressed(EditorKey.Backspace)) field.Backspace();
+        if (k.IsPressed(EditorKey.Delete)) field.Delete();
+        if (k.IsPressed(EditorKey.Left)) field.MoveLeft();
+        if (k.IsPressed(EditorKey.Right)) field.MoveRight();
+        if (k.IsPressed(EditorKey.Home)) field.Home();
+        if (k.IsPressed(EditorKey.End)) field.End();
+
+        if (!ctrl || alt)
+            foreach (var c in chars)
+                field.Insert(c); // control chars ('\r', '\b', ...) are ignored by the field
+
+        return !ctrl && k.IsPressed(EditorKey.Enter);
+    }
+
+    void HandleTextKeys(IKeyInput k, ReadOnlySpan<char> chars, int pageLines)
+    {
+        bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
+
+        if (ctrl && !alt)
+        {
+            if (k.IsPressed(EditorKey.Z)) { if (shift) _core.DoRedo(); else _core.DoUndo(); }
+            else if (k.IsPressed(EditorKey.Y)) _core.DoRedo();
+            else if (k.IsPressed(EditorKey.A)) _core.SelectAll();
+            else if (k.IsPressed(EditorKey.C)) _core.Copy();
+            else if (k.IsPressed(EditorKey.X)) _core.Cut();
+            else if (k.IsPressed(EditorKey.V)) _core.Paste();
+        }
+
+        if (!alt)
+        {
+            if (k.IsPressed(EditorKey.Left)) _core.MoveLeft(shift, ctrl);
+            if (k.IsPressed(EditorKey.Right)) _core.MoveRight(shift, ctrl);
+            if (k.IsPressed(EditorKey.Up)) _core.MoveUp(1, shift);
+            if (k.IsPressed(EditorKey.Down)) _core.MoveDown(1, shift);
+            if (k.IsPressed(EditorKey.PageUp)) _core.MoveUp(pageLines, shift);
+            if (k.IsPressed(EditorKey.PageDown)) _core.MoveDown(pageLines, shift);
+            if (k.IsPressed(EditorKey.Home)) { if (ctrl) _core.MoveToStartOfFile(shift); else _core.MoveHome(shift); }
+            if (k.IsPressed(EditorKey.End)) { if (ctrl) _core.MoveToEndOfFile(shift); else _core.MoveEnd(shift); }
+            if (k.IsPressed(EditorKey.Backspace)) _core.Backspace(ctrl);
+            if (k.IsPressed(EditorKey.Delete)) _core.Delete(ctrl);
+            if (!ctrl && k.IsPressed(EditorKey.Enter)) _core.TypeChar('\n');
+            if (!ctrl && k.IsPressed(EditorKey.Tab)) _core.Tab(shift);
+        }
+
+        if (!ctrl || alt) // Ctrl+Alt = AltGr on European layouts
+        {
+            foreach (var c in chars)
+                if (c >= 32 && c != 127)
+                    _core.TypeChar(c);
+        }
+    }
+
+    void OpenFind()
+    {
+        _findOpen = true;
+        _gotoOpen = false;
+        _target = FocusTarget.Find;
+        _findOrigin = _core.SelectionStart;
+        if (_core.HasSelection && _core.SelectionStart.Line == _core.SelectionEnd.Line)
+            _findField.SetText(_core.Buffer.GetLineSpan(_core.SelectionStart.Line)[_core.SelectionStart.Column.._core.SelectionEnd.Column]);
+        else
+            _findField.SelectAll();
+    }
+
+    void OpenGoto()
+    {
+        _gotoOpen = true;
+        _findOpen = false;
+        _target = FocusTarget.Goto;
+        _gotoField.Clear();
+    }
+
+    void CloseBars()
+    {
+        _findOpen = false;
+        _gotoOpen = false;
+        _target = FocusTarget.Text;
+        _focusTextNextFrame = true;
+    }
+
+    /// <summary>Pushes the find field into the search model; on change, selects the first match from where Find was opened.</summary>
+    void SyncFindQuery()
+    {
+        if (_findField.Version == _findFieldSeenVersion)
+            return;
+        _findFieldSeenVersion = _findField.Version;
+        _find.SetQuery(_findField.Text, _caseSensitive);
+        if (_find.HasQuery && _find.FindNext(_core.Buffer, _findOrigin, out var s, out var e))
+            _core.Select(s, e);
+    }
+
+    void FindStep(bool forward)
+    {
+        if (!_find.HasQuery)
+            return;
+        bool ok = forward
+            ? _find.FindNext(_core.Buffer, _core.SelectionEnd, out var s, out var e)
+            : _find.FindPrev(_core.Buffer, _core.SelectionStart, out s, out e);
+        if (ok)
+            _core.Select(s, e);
+    }
+
     // ================================================================= text area
 
     void DrawTextArea()
@@ -220,6 +410,7 @@ public sealed class LuaCodeEditor
             _focusTextNextFrame = false;
         }
         bool textFocused = ImGui.IsWindowFocused();
+        _textWindowFocused = textFocused;
 
         var winPos = ImGui.GetWindowPos();
         var visible = ImGui.GetWindowContentRegionMax() - ImGui.GetWindowContentRegionMin();
@@ -230,15 +421,13 @@ public sealed class LuaCodeEditor
             ContentOrigin = origin,
             WindowPos = winPos,
             WindowSize = visible,
-            Focused = textFocused,
+            Focused = textFocused && _target == FocusTarget.Text,
             HighlightLine = _highlightLine,
             ShowFindMatches = _findOpen && _find.HasQuery,
             CurrentMatchStart = _core.SelectionStart,
             CurrentMatchEnd = _core.SelectionEnd,
         };
 
-        if (textFocused)
-            HandleKeyboard((int)MathF.Max(1, visible.Y / lineH - 1));
         HandleMouse(in f);
 
         _colorizer.Run(ColorizeBudgetPerFrame);
@@ -356,51 +545,6 @@ public sealed class LuaCodeEditor
         _sink.TextUnformatted(diag.Message);
     }
 
-    // ================================================================= input
-
-    void HandleKeyboard(int pageLines)
-    {
-        var k = KeyInput;
-        bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
-
-        if (ctrl && !alt)
-        {
-            if (k.IsPressed(EditorKey.Z)) { if (shift) _core.DoRedo(); else _core.DoUndo(); }
-            else if (k.IsPressed(EditorKey.Y)) _core.DoRedo();
-            else if (k.IsPressed(EditorKey.A)) _core.SelectAll();
-            else if (k.IsPressed(EditorKey.C)) _core.Copy();
-            else if (k.IsPressed(EditorKey.X)) _core.Cut();
-            else if (k.IsPressed(EditorKey.V)) _core.Paste();
-        }
-
-        if (!alt)
-        {
-            if (k.IsPressed(EditorKey.Left)) _core.MoveLeft(shift, ctrl);
-            if (k.IsPressed(EditorKey.Right)) _core.MoveRight(shift, ctrl);
-            if (k.IsPressed(EditorKey.Up)) _core.MoveUp(1, shift);
-            if (k.IsPressed(EditorKey.Down)) _core.MoveDown(1, shift);
-            if (k.IsPressed(EditorKey.PageUp)) _core.MoveUp(pageLines, shift);
-            if (k.IsPressed(EditorKey.PageDown)) _core.MoveDown(pageLines, shift);
-            if (k.IsPressed(EditorKey.Home)) { if (ctrl) _core.MoveToStartOfFile(shift); else _core.MoveHome(shift); }
-            if (k.IsPressed(EditorKey.End)) { if (ctrl) _core.MoveToEndOfFile(shift); else _core.MoveEnd(shift); }
-            if (k.IsPressed(EditorKey.Backspace)) _core.Backspace(ctrl);
-            if (k.IsPressed(EditorKey.Delete)) _core.Delete(ctrl);
-            if (!ctrl && k.IsPressed(EditorKey.Enter)) _core.TypeChar('\n');
-            if (!ctrl && k.IsPressed(EditorKey.Tab)) _core.Tab(shift);
-        }
-
-        int n = k.ReadTypedChars(_typed);
-        if (!ctrl || alt) // Ctrl+Alt = AltGr on European layouts
-        {
-            for (int i = 0; i < n; i++)
-            {
-                char c = _typed[i];
-                if (c >= 32 && c != 127)
-                    _core.TypeChar(c);
-            }
-        }
-    }
-
     void HandleMouse(in FrameParams f)
     {
         bool hovered = ImGui.IsWindowHovered();
@@ -412,6 +556,7 @@ public sealed class LuaCodeEditor
 
         if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
+            _target = FocusTarget.Text;
             var pos = _view.ScreenToCoordinates(mouse, in f, _metrics);
             if (mouse.X < gutterRight)
             {
@@ -439,57 +584,58 @@ public sealed class LuaCodeEditor
         }
     }
 
-    /// <summary>Ctrl+F / Ctrl+G / F3 / Escape — active while the editor or one of its bars is focused.</summary>
-    void HandleBarKeys()
-    {
-        var k = KeyInput;
-        bool ctrl = k.Ctrl;
-        if (ctrl && !k.Alt && k.IsPressed(EditorKey.F))
-        {
-            OpenFind();
-        }
-        else if (ctrl && !k.Alt && k.IsPressed(EditorKey.G))
-        {
-            _gotoOpen = true;
-            _findOpen = false;
-            _focusGotoInput = true;
-            _gotoBuf.AsSpan().Clear();
-        }
-        else if (k.IsPressed(EditorKey.F3))
-        {
-            FindStep(!k.Shift);
-        }
-        else if (k.IsPressed(EditorKey.Escape) && (_findOpen || _gotoOpen))
-        {
-            _findOpen = false;
-            _gotoOpen = false;
-            _focusTextNextFrame = true;
-        }
-    }
+    // ================================================================= bars (drawn with our own field, not ImGui.InputText)
 
-    void OpenFind()
+    /// <summary>Draws a single-line field; returns true when clicked (caller makes it the key target).</summary>
+    bool DrawField(string id, LineInput field, float width, bool active)
     {
-        _findOpen = true;
-        _gotoOpen = false;
-        _focusFindInput = true;
-        _findOrigin = _core.SelectionStart;
-        if (_core.HasSelection && _core.SelectionStart.Line == _core.SelectionEnd.Line)
-        {
-            var span = _core.Buffer.GetLineSpan(_core.SelectionStart.Line)[_core.SelectionStart.Column.._core.SelectionEnd.Column];
-            _findBuf.AsSpan().Clear();
-            Utf8.FromUtf16(span, _findBuf.AsSpan(0, _findBuf.Length - 1), out _, out _, replaceInvalidSequences: true);
-        }
-    }
+        var pal = _view.Palette;
+        float h = ImGui.GetFrameHeight();
+        ImGui.InvisibleButton(id, new Vector2(width, h));
+        bool clicked = ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+        if (ImGui.IsItemHovered())
+            ImGui.SetMouseCursor(ImGuiMouseCursor.TextInput);
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
 
-    void FindStep(bool forward)
-    {
-        if (!_find.HasQuery)
-            return;
-        bool ok = forward
-            ? _find.FindNext(_core.Buffer, _core.SelectionEnd, out var s, out var e)
-            : _find.FindPrev(_core.Buffer, _core.SelectionStart, out s, out e);
-        if (ok)
-            _core.Select(s, e);
+        const float pad = 4f;
+        var text = field.Text;
+        float caretX = 0;
+        for (int i = 0; i < field.Cursor; i++)
+            caretX += _metrics.Advance(text[i]);
+        float textW = caretX;
+        for (int i = field.Cursor; i < text.Length; i++)
+            textW += _metrics.Advance(text[i]);
+        float scroll = MathF.Max(0, caretX - (width - 2 * pad - 2));
+
+        if (clicked)
+        {
+            float local = ImGui.GetMousePos().X - (min.X + pad) + scroll;
+            float x = 0;
+            int idx = 0;
+            while (idx < text.Length && x + _metrics.Advance(text[idx]) * 0.5f < local)
+                x += _metrics.Advance(text[idx++]);
+            field.SetCursor(idx);
+        }
+
+        _sink.Begin(ImGui.GetWindowDrawList());
+        _sink.Rect(min, max, pal.FieldBackground);
+        uint border = active ? pal.FieldBorderActive : pal.FieldBorder;
+        _sink.Line(min, new Vector2(max.X, min.Y), border, 1f);
+        _sink.Line(new Vector2(max.X, min.Y), max, border, 1f);
+        _sink.Line(max, new Vector2(min.X, max.Y), border, 1f);
+        _sink.Line(new Vector2(min.X, max.Y), min, border, 1f);
+
+        _sink.PushClip(min + new Vector2(pad, 0), max - new Vector2(pad, 0));
+        float ty = min.Y + (h - ImGui.GetFontSize()) * 0.5f;
+        float tx = min.X + pad - scroll;
+        if (field.AllSelected)
+            _sink.Rect(new Vector2(tx, ty), new Vector2(tx + textW, ty + ImGui.GetFontSize()), pal.Selection);
+        _sink.Text(new Vector2(tx, ty), pal.Tokens[0], text);
+        if (active && (ImGui.GetTime() - _blinkStart) % 1.0 < 0.6)
+            _sink.Rect(new Vector2(tx + caretX, ty), new Vector2(tx + caretX + 1.5f, ty + ImGui.GetFontSize()), pal.Cursor);
+        _sink.PopClip();
+        return clicked;
     }
 
     void DrawFindBar()
@@ -497,34 +643,9 @@ public sealed class LuaCodeEditor
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Find");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(MathF.Min(260, MathF.Max(80, ImGui.GetContentRegionAvail().X - 260)));
-        if (_focusFindInput)
-        {
-            ImGui.SetKeyboardFocusHere();
-            _focusFindInput = false;
-        }
-        bool enter = ImGui.InputText("##find", _findBuf, (uint)_findBuf.Length, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll);
-
-        // sync query from the UTF-8 buffer (no allocation)
-        int len = Array.IndexOf(_findBuf, (byte)0);
-        if (len < 0)
-            len = _findBuf.Length;
-        Utf8.ToUtf16(_findBuf.AsSpan(0, len), _decoded, out _, out int chars, replaceInvalidSequences: true);
-        var before = _find.Query.Length;
-        bool wasEqual = _find.Query.SequenceEqual(_decoded.AsSpan(0, chars));
-        _find.SetQuery(_decoded.AsSpan(0, chars), _caseSensitive);
-        if ((!wasEqual || before != chars) && _find.HasQuery)
-        {
-            // incremental: jump to the first match from where Find was opened
-            if (_find.FindNext(_core.Buffer, _findOrigin, out var s, out var e))
-                _core.Select(s, e);
-        }
-
-        if (enter)
-        {
-            FindStep(!KeyInput.Shift);
-            _focusFindInput = true;
-        }
+        float w = MathF.Min(260, MathF.Max(80, ImGui.GetContentRegionAvail().X - 260));
+        if (DrawField("##findfield", _findField, w, _target == FocusTarget.Find))
+            _target = FocusTarget.Find;
 
         ImGui.SameLine();
         if (ImGui.Button("<"))
@@ -534,33 +655,30 @@ public sealed class LuaCodeEditor
             FindStep(true);
         ImGui.SameLine();
         if (ImGui.Checkbox("Aa", ref _caseSensitive))
-            _find.SetQuery(_find.Query, _caseSensitive);
+            _find.SetQuery(_findField.Text, _caseSensitive);
         ImGui.SameLine();
 
         Span<char> label = stackalloc char[32];
         int count = _find.CountMatches(_core.Buffer);
-        int w;
+        int len;
         if (!_find.HasQuery)
-            w = 0;
+            len = 0;
         else if (count == 0)
         {
             "No results".AsSpan().CopyTo(label);
-            w = 10;
+            len = 10;
         }
         else
         {
-            count.TryFormat(label, out w);
+            count.TryFormat(label, out len);
             var suffix = count == 1 ? " match" : " matches";
-            suffix.AsSpan().CopyTo(label[w..]);
-            w += suffix.Length;
+            suffix.AsSpan().CopyTo(label[len..]);
+            len += suffix.Length;
         }
-        _sink.TextUnformatted(label[..w]);
+        _sink.TextUnformatted(label[..len]);
         ImGui.SameLine();
         if (ImGui.Button("x##closefind"))
-        {
-            _findOpen = false;
-            _focusTextNextFrame = true;
-        }
+            CloseBars();
     }
 
     void DrawGotoBar()
@@ -568,13 +686,8 @@ public sealed class LuaCodeEditor
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Go to line");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(90);
-        if (_focusGotoInput)
-        {
-            ImGui.SetKeyboardFocusHere();
-            _focusGotoInput = false;
-        }
-        bool enter = ImGui.InputText("##goto", _gotoBuf, (uint)_gotoBuf.Length, ImGuiInputTextFlags.CharsDecimal | ImGuiInputTextFlags.EnterReturnsTrue);
+        if (DrawField("##gotofield", _gotoField, 90, _target == FocusTarget.Goto))
+            _target = FocusTarget.Goto;
         ImGui.SameLine();
         Span<char> label = stackalloc char[24];
         "(1-".AsSpan().CopyTo(label);
@@ -583,27 +696,7 @@ public sealed class LuaCodeEditor
         _sink.TextUnformatted(label[..(4 + w)]);
         ImGui.SameLine();
         if (ImGui.Button("x##closegoto"))
-        {
-            _gotoOpen = false;
-            _focusTextNextFrame = true;
-        }
-
-        if (enter)
-        {
-            int value = 0;
-            foreach (var b in _gotoBuf)
-            {
-                if (b == 0)
-                    break;
-                if (b >= (byte)'0' && b <= (byte)'9' && value < 10_000_000)
-                    value = value * 10 + (b - '0');
-            }
-            _gotoOpen = false;
-            if (value > 0)
-                GoToLine(value - 1);
-            else
-                _focusTextNextFrame = true;
-        }
+            CloseBars();
     }
 
     // ================================================================= test hooks
@@ -611,6 +704,11 @@ public sealed class LuaCodeEditor
     internal EditorCore Core => _core;
     internal DiagnosticStore Diagnostics => _diagnostics;
     internal FindModel Find => _find;
+    internal FocusTarget Target => _target;
+    internal bool FindOpen => _findOpen;
+    internal bool GotoOpen => _gotoOpen;
+    internal LineInput FindField => _findField;
+    internal LineInput GotoField => _gotoField;
 
     internal bool ColorizeAll() => _colorizer.Run(int.MaxValue);
 

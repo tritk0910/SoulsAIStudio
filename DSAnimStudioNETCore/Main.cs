@@ -2129,13 +2129,13 @@ namespace DSAnimStudio
 
                 UpdateTime(gameTime.ElapsedGameTime);
 
-                var newTitle = $"DS ANIM STUDIO {DSAS_VERSION_STRING}";
+                var newTitle = SoulsAiStudio.App.SasHooks.AppTitle(DSAS_VERSION_STRING); // [SAS] was "DS ANIM STUDIO {ver}"
 
                 if (!string.IsNullOrWhiteSpace(TAE_EDITOR?.NewFileContainerName))
                     newTitle = $"{System.IO.Path.GetFileName(TAE_EDITOR.NewFileContainerName)}" +
                         $"{(TAE_EDITOR.IsModified ? "*" : "")}" +
                         $"{(TAE_EDITOR.IsReadOnlyFileMode ? " !READ ONLY!" : "")}" +
-                        $" - DS ANIM STUDIO {DSAS_VERSION_STRING}";
+                        $" - {SoulsAiStudio.App.SasHooks.AppTitle(DSAS_VERSION_STRING)}"; // [SAS]
 
                 if (IsPatreonBuild)
                     newTitle += " [PATREON EXLUSIVE VER, DO NOT REDISTRIBUTE]";

@@ -6,7 +6,7 @@
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>AnyCPU;x64</Platforms>
-    <AssemblyName>DS ANIM STUDIO</AssemblyName>
+    <AssemblyName>Souls AI Studio</AssemblyName> <!-- [SAS] was DS ANIM STUDIO -->
     <ApplicationIcon>DSAnimStudio_Icon.ico</ApplicationIcon>
     <UseWindowsForms>True</UseWindowsForms>
     <RootNamespace>DSAnimStudio</RootNamespace>

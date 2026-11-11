@@ -444,7 +444,7 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 1. ~~Fork DSAS, build~~ (xong: clone + branch `sas/main`, build xanh). Còn: chạy thử app với Sekiro.
 2. ~~Đọc code DSAS, chốt `[TBD]`~~ (xong phần lớn — xem `docs/review/`, `docs/ux/`).
 3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `DSAnimStudioNETCore/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). Còn: file watcher.
-   - Mở thẳng project: `"DS ANIM STUDIO.exe" --sas-project <file.sasproj>`. Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
+   - Mở thẳng project: `"Souls AI Studio.exe" --sas-project <file.sasproj>` (exe: `DSAnimStudioNETCore/bin/Release/net9.0-windows7.0/Souls AI Studio.exe`). Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
 4. Prototype **Lua editor trong ImGui** (rủi ro lớn nhất) + đọc/ghi luabnd Sekiro.
 5. Entity browser + resolve param chain (NpcParam → NpcThinkParam → Lua; BehaviorParam → AtkParam/SpEffect).
 6. Khóa TAE editor theo whitelist (P1.5).
