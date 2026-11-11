@@ -30,7 +30,8 @@ namespace SoulsAiStudio.App
 
         // Analysis snapshot (built off the UI thread, debounced).
         public IReadOnlyList<GoalFunction> Outline = Array.Empty<GoalFunction>();
-        public Task<IReadOnlyList<GoalFunction>>? OutlineTask;
+        public ILookup<int, AnimReference> AnimsByLine = Array.Empty<AnimReference>().ToLookup(a => a.Line);
+        public Task<(IReadOnlyList<GoalFunction> Outline, ILookup<int, AnimReference> Anims)>? OutlineTask;
         public long OutlineVersion = -1;
         public DateTime LastEdit = DateTime.MinValue;
 
@@ -61,6 +62,9 @@ namespace SoulsAiStudio.App
         private OpenScript? _selectTab; // force-select next frame (ImGui keeps its own tab selection otherwise)
         private string _navFilter = "";
         public bool IsOpen = true;
+
+        /// <summary>Dock node of this window when its tab was visible this frame, else 0.</summary>
+        public uint VisibleInDockId { get; private set; }
 
         public LuaEditorPanel(SasApp app) => _app = app;
 
@@ -103,6 +107,7 @@ namespace SoulsAiStudio.App
         public bool Build()
         {
             _keys.NewFrame();
+            VisibleInDockId = 0;
             foreach (var o in _open) PollTasks(o);
             if (!IsOpen) return false;
 
@@ -115,6 +120,7 @@ namespace SoulsAiStudio.App
             {
                 if (visible)
                 {
+                    VisibleInDockId = ImGui.IsWindowDocked() ? ImGui.GetWindowDockID() : 0;
                     focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
                     if (focused && _keys.CtrlS) SaveActive();
                     BuildTabs();
@@ -201,6 +207,12 @@ namespace SoulsAiStudio.App
             }
             ImGui.SameLine();
             var (line, col) = o.Editor.Cursor;
+            foreach (var a in o.AnimsByLine[line])
+            {
+                if (ImGui.SmallButton($"▶ {a.AnimId}##play{a.AnimId}")) _app.PlayAnim(a.AnimId);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{a.GoalType}: show anim a000_{a.AnimId:D6} in the timeline/viewport");
+                ImGui.SameLine();
+            }
             ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+G go to line · Ctrl+S save");
         }
 
@@ -244,14 +256,18 @@ namespace SoulsAiStudio.App
             if (o.OutlineTask is { IsCompleted: true } ot)
             {
                 o.OutlineTask = null;
-                if (ot.IsCompletedSuccessfully) o.Outline = ot.Result;
+                if (ot.IsCompletedSuccessfully) { o.Outline = ot.Result.Outline; o.AnimsByLine = ot.Result.Anims; }
             }
             else if (o.OutlineTask == null && o.Doc != null && o.OutlineVersion != o.Editor.Version
                      && DateTime.UtcNow - o.LastEdit >= AnalysisDebounce)
             {
                 o.OutlineVersion = o.Editor.Version;
                 string snapshot = o.Editor.Text;
-                o.OutlineTask = Task.Run(() => GoalOutline.Build(snapshot));
+                o.OutlineTask = Task.Run(() =>
+                {
+                    var tokens = SoulsAiStudio.Core.Lua.Syntax.LuaLexer.Tokenize(snapshot);
+                    return (GoalOutline.Build(snapshot, tokens), AnimReferences.Build(snapshot, tokens).ToLookup(a => a.Line));
+                });
             }
         }
     }

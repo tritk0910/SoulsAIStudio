@@ -20,6 +20,9 @@ namespace SoulsAiStudio.App
         public SasSettings Settings { get; } = SasSettings.Load();
         public RecentProjects Recent { get; } = new(Path.Combine(SasSettings.UserDataDir, "recent.json"));
         public ProjectSession? Session { get; private set; }
+        public SasLayout Layout { get; } = new();
+        public DsasBridge Bridge { get; } = new();
+        private bool _autoLoadCharacter;
         public SasProject? Project => Session?.Project;
 
         private readonly StartScreen _start;
@@ -85,6 +88,7 @@ namespace SoulsAiStudio.App
 
             var reopen = project.Scripts.FirstOrDefault(s => s.Key == project.Ui.OpenScriptKey) ?? project.Scripts.FirstOrDefault();
             if (reopen != null) _editor.Open(reopen);
+            _autoLoadCharacter = reopen != null;
             Notify($"Opened project '{project.Name}'.");
         }
 
@@ -129,9 +133,18 @@ namespace SoulsAiStudio.App
             focused |= _wizard.Build();
             if (Session != null)
             {
+                if (_autoLoadCharacter && _editor.ActiveScript is { } s)
+                {
+                    _autoLoadCharacter = false;
+                    var files = ResolveCharacter(s);
+                    if (files != null && !Bridge.IsLoaded(files)) LoadCharacter(s);
+                }
+                Layout.ApplyIfNeeded(Settings);
+                if (Layout.FocusEditorTabFrames > 0) { ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
                 focused |= _scripts.Build();
                 focused |= _editor.Build();
             }
+            SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
             BuildErrorPopup();
             // While any of our windows has focus, DSAS's TAE shortcuts must not fire (CLAUDE.md §6 key routing).
             if (focused) anyFieldFocused = true;
@@ -159,7 +172,41 @@ namespace SoulsAiStudio.App
             ImGui.Separator();
             if (ImGui.MenuItem("Scripts Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
+            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = true; Layout.RequestApply(); }
             ImGui.EndMenu();
+        }
+
+        // ---------- characters (model + animations in DSAS) ----------
+
+        public SoulsAiStudio.Core.Project.CharacterFiles? ResolveCharacter(ProjectScript script) =>
+            Project == null ? null : new SoulsAiStudio.Core.Project.CharacterLocator(Project.GameDir, Project.ModDir).Resolve(script);
+
+        public void SetCharacter(ProjectScript script, string chr)
+        {
+            script.Character = chr.Trim();
+            SaveProjectUiState();
+        }
+
+        public void LoadCharacter(ProjectScript script)
+        {
+            var files = ResolveCharacter(script);
+            if (files == null || Project == null) { Notify($"No anibnd found for {script.FileName}. Set the Character (e.g. c5060)."); return; }
+            try
+            {
+                Bridge.LoadCharacter(files, Project.GameDir, Project.ModDir, chr =>
+                {
+                    Notify($"Loaded {chr}.");
+                    Layout.FocusEditorTabFrames = 30; // DSAS brings Graph to front on load; keep the Lua editor visible
+                });
+                Notify($"Loading {files.ChrId}...");
+            }
+            catch (Exception ex) { ReportError($"Could not load {files.ChrId}", ex); }
+        }
+
+        public void PlayAnim(int animId)
+        {
+            if (!Bridge.GotoAnim(animId))
+                Notify($"Anim {animId} not found — load the character first (Scripts panel → Load model & anims).");
         }
 
         // ---------- safety for DSAS writes ----------

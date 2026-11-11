@@ -254,6 +254,7 @@ namespace DSAnimStudio.ImguiOSD
                         RequestWindowSize = null;
                         
                         Focused = ImGui.IsWindowFocused();
+                        SoulsAiStudio.App.SasHooks.ReportWindowDock(NewImguiWindowTitle, ImGui.GetWindowDockID()); // [SAS] default layout needs DSAS dock nodes
                         Hovered = ImGui.IsWindowHovered();
 
                         var rect = GetRect().DpiScaled();

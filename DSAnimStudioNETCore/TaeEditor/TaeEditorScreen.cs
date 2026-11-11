@@ -4370,7 +4370,7 @@ namespace DSAnimStudio.TaeEditor
                 //{
                 //    HoveringOverEventBox = null;
                 //}
-                if (Graph?.Rect.Contains(Input.MousePosition) ?? false)
+                if ((Graph?.Rect.Contains(Input.MousePosition) ?? false) && !SoulsAiStudio.App.SasHooks.GraphHidden) // [SAS] Lua editor tab covers the graph
                 {
                     Graph?.Update(elapsedTime);
                 }
@@ -4466,7 +4466,7 @@ namespace DSAnimStudio.TaeEditor
 
             }
 
-            if (Graph != null)
+            if (Graph != null && !SoulsAiStudio.App.SasHooks.GraphHidden) // [SAS] don't draw over the Lua editor tab
             {
                 try
                 {

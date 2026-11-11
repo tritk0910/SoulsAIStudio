@@ -99,6 +99,9 @@ public sealed class ProjectScript
     /// <summary>Optional display name, e.g. "Inner Owl (Father)".</summary>
     public string DisplayName { get; set; } = "";
 
+    /// <summary>Character override, e.g. <c>c5060</c>. Empty = guessed from the script id (see <see cref="CharacterLocator"/>).</summary>
+    public string Character { get; set; } = "";
+
     [JsonIgnore] public string FileName => EntryPath[(EntryPath.LastIndexOf('\\') + 1)..];
     [JsonIgnore] public string Key => $"{Luabnd}|{EntryPath}";
     [JsonIgnore] public string Label => string.IsNullOrEmpty(DisplayName) ? FileName : $"{DisplayName} ({FileName})";

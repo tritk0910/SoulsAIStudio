@@ -48,11 +48,40 @@ namespace SoulsAiStudio.App
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{s.Luabnd} / {s.EntryPath}");
                 }
 
+                if (_editor.ActiveScript is { } script) BuildCharacter(script);
+
                 ImGui.Separator();
                 BuildOutline();
             }
             finally { ImGui.End(); }
             return focused;
+        }
+
+        private string _chrEdit = "";
+        private string? _chrEditKey;
+
+        /// <summary>Character (model + animations) for the active script, loaded into DSAS's viewport/timeline.</summary>
+        private void BuildCharacter(SoulsAiStudio.Core.Project.ProjectScript script)
+        {
+            ImGui.Separator();
+            var files = _app.ResolveCharacter(script);
+            if (_chrEditKey != script.Key) { _chrEditKey = script.Key; _chrEdit = script.Character; }
+
+            ImGui.Text("Character");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(90);
+            if (ImGui.InputTextWithHint("##sas_chr", files?.ChrId ?? "c0000", ref _chrEdit, 16, ImGuiInputTextFlags.EnterReturnsTrue))
+                _app.SetCharacter(script, _chrEdit);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Leave empty to guess from the script id (e.g. 506300 → c5060). Enter to apply.");
+            ImGui.SameLine();
+            bool loaded = files != null && _app.Bridge.IsLoaded(files);
+            if (files == null) ImGui.TextColored(Theme.Warn, "not found");
+            else if (ImGui.Button(loaded ? "Reload##sas_chr_load" : "Load model & anims##sas_chr_load")) _app.LoadCharacter(script);
+            if (files != null)
+            {
+                ImGui.TextDisabled($"{files.ChrId} ({(files.AnibndFromMod ? "mod" : "game")}){(loaded ? " – loaded" : "")}");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(files.AnibndPath + "\n" + (files.ChrbndPath ?? "(no chrbnd)"));
+            }
         }
 
         private void BuildOutline()

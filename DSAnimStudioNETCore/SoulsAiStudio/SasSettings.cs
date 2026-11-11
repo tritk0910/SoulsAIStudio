@@ -15,6 +15,8 @@ namespace SoulsAiStudio.App
         public string LastModDir { get; set; } = "";
         public string LastProjectFolder { get; set; } = "";
         public bool ShowStartScreenOnLaunch { get; set; } = true;
+        /// <summary>Version of the default dock layout already applied (see <see cref="SasLayout"/>).</summary>
+        public int LayoutVersion { get; set; }
 
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the

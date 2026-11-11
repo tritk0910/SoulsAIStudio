@@ -14,11 +14,26 @@ namespace SoulsAiStudio.App
         private static readonly Lazy<SasApp> _app = new(() => new SasApp()); // thread-safe: WriteBinder runs on DSAS's loading thread
         public static SasApp App => _app.Value;
 
+        /// <summary>
+        /// True while our Lua Editor tab is the visible tab of the dock node that hosts DSAS's "Graph". The TAE graph is
+        /// custom-drawn (not ImGui), so DSAS must skip its draw + mouse input then, or it paints over the editor.
+        /// </summary>
+        public static volatile bool GraphHidden;
+
         /// <summary>Called from <c>OSD.Build</c> after DSAS windows; draws our windows.</summary>
         public static void BuildWindows(ref bool anyFieldFocused)
         {
             try { App.BuildWindows(ref anyFieldFocused); }
             catch (Exception ex) { App.ReportError("UI error", ex); }
+        }
+
+        /// <summary>Called from DSAS <c>Window.Update</c> right after <c>ImGui.Begin</c>: reports its dock node.</summary>
+        public static void ReportWindowDock(string title, uint dockId) => App.Layout.ReportDock(title, dockId);
+
+        /// <summary>Called by DSAS right after it creates the document for an open-recent request.</summary>
+        public static void BeforeOpenRecent(DSAnimStudio.zzz_DocumentIns doc, DSAnimStudio.DSAProj.TaeContainerInfo container)
+        {
+            try { App.Bridge.BeforeOpenRecent(doc, container); } catch (Exception ex) { App.ReportError("Load hook", ex); }
         }
 
         /// <summary>Called from <c>MenuBar.BuildMenuBar</c> before the DSAS menus.</summary>

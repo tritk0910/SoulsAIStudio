@@ -421,6 +421,7 @@ namespace DSAnimStudio
                 RequestFileOpenRecent_AfterOpenAction = (doc) => { };
 
                 zzz_DocumentManager.AddDocument("New Document", immediateSwitch: true);
+                SoulsAiStudio.App.SasHooks.BeforeOpenRecent(CurrentDocument, selectedFile); // [SAS] no workspace prompt for our project loads
 
                 var thisDoc = CurrentDocument;
 
