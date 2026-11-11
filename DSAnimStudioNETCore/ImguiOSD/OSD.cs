@@ -481,6 +481,7 @@ namespace DSAnimStudio.ImguiOSD
 
                     SpWindowDocManToolbar.Update(ref actualFocusedWindow, ref currentFocusedWindow, ref anyWindowHovered,
                         ref anyFieldFocused);
+                    SoulsAiStudio.App.SasHooks.BuildWindows(ref anyFieldFocused); // [SAS]
                 }
 
                 // ForAllStaticWindows(window =>

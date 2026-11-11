@@ -390,7 +390,7 @@ Nguyên tắc:
 - Repo này là clone của `https://github.com/Meowmaritus/DSAnimStudio` (remote `upstream`), làm việc trên branch **`sas/main`**. Submodule `SoulsAssetPipeline` (SoulsFormats, Havoc) đã init. Submodule `MeowDSIO` không dùng.
 - **License: GPLv3** (theo DSAS) → toàn bộ fork là GPLv3.
 - DSAS app: `DSAnimStudioNETCore/` (net9.0-windows7.0). Code mới: `src/SoulsAiStudio.Core` (net9.0), test: `tests/SoulsAiStudio.Core.Tests` (xUnit). Cả hai nằm trong solution folder `SoulsAiStudio` của `DSAnimStudioNETCore.sln`.
-- Máy dev chỉ có **.NET 10 runtime** (SDK 7 + 10, không có runtime 9) → project net9 cần chạy được phải có `<RollForward>LatestMajor</RollForward>` (đã đặt cho test project). App DSAS: thêm file mới `DSAnimStudioNETCore/runtimeconfig.template.json` với `rollForward: LatestMajor` (không sửa file DSAS nào). Không retarget sang net10 (phải sửa submodule SoulsAssetPipeline).
+- Máy dev đã cài cả .NET 9 và .NET 10 runtime. Vẫn giữ `RollForward=LatestMajor` (test project + `DSAnimStudioNETCore/runtimeconfig.template.json`) để chạy được trên máy chỉ có .NET 10. Không retarget sang net10 (phải sửa submodule SoulsAssetPipeline).
 ```
 dotnet build DSAnimStudioNETCore/DSAnimStudioNETCore.csproj   # DSAS (≈4000 warning có sẵn từ upstream, 0 error)
 dotnet test tests/SoulsAiStudio.Core.Tests
@@ -443,7 +443,8 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 ## 11. Thứ tự bắt tay vào làm
 1. ~~Fork DSAS, build~~ (xong: clone + branch `sas/main`, build xanh). Còn: chạy thử app với Sekiro.
 2. ~~Đọc code DSAS, chốt `[TBD]`~~ (xong phần lớn — xem `docs/review/`, `docs/ux/`).
-3. Project system (New/Open/Recent) + đọc/ghi luabnd (WitchyBND layout) + backup + file watcher.
+3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `DSAnimStudioNETCore/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). Còn: file watcher.
+   - Mở thẳng project: `"DS ANIM STUDIO.exe" --sas-project <file.sasproj>`. Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
 4. Prototype **Lua editor trong ImGui** (rủi ro lớn nhất) + đọc/ghi luabnd Sekiro.
 5. Entity browser + resolve param chain (NpcParam → NpcThinkParam → Lua; BehaviorParam → AtkParam/SpEffect).
 6. Khóa TAE editor theo whitelist (P1.5).

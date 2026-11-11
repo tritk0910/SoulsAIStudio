@@ -712,7 +712,7 @@ namespace DSAnimStudio.TaeEditor
                 if (savedContainer)
                 {
                     var containerBinderBytes = Utils.WriteBinder(containerBinder);
-                    File.WriteAllBytes(Info.GetMainBinderName(), containerBinderBytes);
+                    SoulsAiStudio.App.SasHooks.WriteBinder(Info.GetMainBinderName(), containerBinderBytes); // [SAS] was File.WriteAllBytes (in-place, could hit game dir)
                 }
             }
             else

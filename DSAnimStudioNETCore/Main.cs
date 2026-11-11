@@ -1859,6 +1859,7 @@ namespace DSAnimStudio
                 builder.AddChar((ushort)g.Key);
                 //bw.WriteUInt16((ushort)g.Key);
             }
+            SoulsAiStudio.App.SasHooks.AddExtraGlyphs(builder); // [SAS]
             //var glyphsBytes = bw.FinishBytes();
             //File.WriteAllBytes($@"{Directory}\ImguiFontGlyphs.bin", glyphsBytes);
                     

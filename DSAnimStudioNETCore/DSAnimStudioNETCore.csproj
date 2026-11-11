@@ -101,6 +101,7 @@
     <ProjectReference Include="..\MonoGame\MonoGame.Framework\MonoGame.Framework.WindowsDX.csproj" />
     <ProjectReference Include="..\SoulsAssetPipeline\SoulsAssetPipeline\SoulsAssetPipeline.csproj" />
     <ProjectReference Include="..\SoulsAssetPipeline\SoulsFormats\SoulsFormats.csproj" />
+    <ProjectReference Include="..\src\SoulsAiStudio.Core\SoulsAiStudio.Core.csproj" /> <!-- [SAS] -->
   </ItemGroup>
 
   <ItemGroup>

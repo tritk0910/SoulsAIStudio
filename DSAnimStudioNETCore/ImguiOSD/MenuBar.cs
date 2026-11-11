@@ -42,6 +42,7 @@ namespace DSAnimStudio.ImguiOSD
             bool anyItemFocusedInner = false;
             bool isAnyMenuExpanded = false;
             
+            SoulsAiStudio.App.SasHooks.BuildMenus(ref anyItemFocusedInner, ref isAnyMenuExpanded); // [SAS]
             BuildMenuBar_000_File(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_010_Edit(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_020_Graph(ref anyItemFocusedInner, ref isAnyMenuExpanded);
