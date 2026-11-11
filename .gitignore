@@ -328,3 +328,7 @@ ASALocalRun/
 
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
+
+# --- Souls AI Studio ---
+# Game/mod data from the user's machine - never commit
+test-data/
