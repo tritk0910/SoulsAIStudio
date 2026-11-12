@@ -21,6 +21,11 @@ namespace SoulsAiStudio.App
         private readonly LuaEditorPanel _editor;
         private readonly Random _rng = new();
         private readonly Dictionary<int, int> _choice = new(); // branch line -> arm index
+        private readonly Dictionary<(int Line, int Depth), int> _interrupt = new(); // step -> chosen SpEffect candidate (-1 none)
+        private readonly Dictionary<int, IReadOnlyList<(int SpEffectId, float Frame)>> _spEvents = new(); // anim -> TAE SpEffects
+        private string? _spEventsAnibnd;
+        private SpEffectInterrupts.Table? _handlers;
+        private const int MaxInterruptDepth = 6;
         private string? _cacheKey;
         private IReadOnlyList<ComboNode> _nodes = Array.Empty<ComboNode>();
         private GoalFunction? _goal;
@@ -65,8 +70,11 @@ namespace SoulsAiStudio.App
             _cacheKey = key;
             _goal = goal;
             _choice.Clear();
+            _interrupt.Clear();
             _plan = null;
-            _nodes = goal == null ? Array.Empty<ComboNode>() : ComboSequence.Build(o.Editor.Text, goal);
+            string text = o.Editor.Text;
+            _nodes = goal == null ? Array.Empty<ComboNode>() : ComboSequence.Build(text, goal);
+            _handlers = SpEffectInterrupts.Build(text);
         }
 
         private void BuildContents()
@@ -79,20 +87,22 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             ImGui.Checkbox("Follow cursor", ref _follow);
 
-            var path = ComboSequence.Flatten(_nodes, ChosenArm);
+            if (_spEventsAnibnd != _app.Bridge.LoadedAnibnd) { _spEvents.Clear(); _spEventsAnibnd = _app.Bridge.LoadedAnibnd; }
+            var path = BuildPath(_nodes, 0);
             bool loaded = _app.Bridge.LoadedAnibnd != null;
             if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Scripts panel → Load model & anims).");
 
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
             ImGui.SameLine();
-            if (ImGui.Button("Random path")) { RollRandom(); Play(ComboSequence.Flatten(_nodes, ChosenArm)); }
+            if (ImGui.Button("Random path")) { RollRandom(); Play(BuildPath(_nodes, 0)); }
             ImGui.SameLine();
             if (ImGui.Button(_app.Bridge.ComboPaused ? "▶ Resume" : "|| Pause")) _app.Bridge.ToggleComboPause();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Space also pauses/resumes the combo");
             ImGui.SameLine();
             if (ImGui.Button("■ Stop")) { _app.Bridge.StopCombo(); }
             ImGui.SameLine();
-            ImGui.TextDisabled(path.Count == 0 ? "no anims in this path" : string.Join(" → ", path.Select(s => s.AnimId)));
+            ImGui.TextDisabled(path.Count == 0 ? "no anims in this path"
+                : string.Join(" → ", path.Select(p => p.Cut != null ? p.Step.AnimId + " (SpEffect cut)" : p.Step.AnimId.ToString())));
 
             ImGui.Separator();
             ImGui.BeginChild("##sas_combo_tree", new Vector2(0, _plan != null ? -110 : 0), false);
@@ -116,9 +126,92 @@ namespace SoulsAiStudio.App
             }
         }
 
-        private void Play(List<ComboStep> path)
+        /// <summary>A step on the played path; Cut = frame where a chosen SpEffect interrupt cuts it.</summary>
+        private sealed record PathItem(ComboStep Step, float? Cut);
+
+        /// <summary>
+        /// Flattens the chosen branches; where the user picked a SpEffect interrupt on a step, that anim is cut at the
+        /// SpEffect's frame and the handler's sequence follows (replacing the rest when it starts with ClearSubGoal,
+        /// queued after it otherwise).
+        /// </summary>
+        private List<PathItem> BuildPath(IReadOnlyList<ComboNode> nodes, int depth)
         {
-            _plan = _app.Bridge.PlayCombo(path.Select(s => s.AnimId).ToList());
+            var result = new List<PathItem>();
+            var steps = ComboSequence.Flatten(nodes, ChosenArm);
+            List<PathItem>? appendAfter = null;
+            foreach (var s in steps)
+            {
+                var chosen = ChosenInterrupt(s, depth);
+                if (chosen == null || depth >= MaxInterruptDepth) { result.Add(new PathItem(s, null)); continue; }
+                var (frame, handler) = chosen.Value;
+                result.Add(new PathItem(s, frame));
+                var rest = BuildPath(handler.Body, depth + 1);
+                if (handler.ClearsQueue) { result.AddRange(rest); return result; }
+                (appendAfter ??= new()).AddRange(rest);
+            }
+            if (appendAfter != null) result.AddRange(appendAfter);
+            return result;
+        }
+
+        private IReadOnlyList<(int SpEffectId, float Frame, SpEffectHandler Handler)> Candidates(int animId)
+        {
+            if (_handlers == null) return Array.Empty<(int, float, SpEffectHandler)>();
+            if (!_spEvents.TryGetValue(animId, out var events)) _spEvents[animId] = events = _app.Bridge.GetSpEffectEvents(animId);
+            var result = new List<(int, float, SpEffectHandler)>();
+            foreach (var e in events)
+                if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans) result.Add((e.SpEffectId, e.Frame, h));
+            return result;
+        }
+
+        /// <summary>Tooltip text: every SpEffect event in the anim's TAE and whether Goal.Interrupt handles it.</summary>
+        private string SpEffectSummary(int animId)
+        {
+            if (!_spEvents.TryGetValue(animId, out var events)) _spEvents[animId] = events = _app.Bridge.GetSpEffectEvents(animId);
+            if (events.Count == 0) return "TAE SpEffect events: none (or character not loaded)";
+            var lines = events.Select(e =>
+            {
+                string how = _handlers != null && _handlers.Handlers.TryGetValue(e.SpEffectId, out var h)
+                    ? (h.Replans ? "Interrupt: Replanning()" : $"Interrupt line {h.Line + 1}")
+                    : "no handler in Goal.Interrupt";
+                return $"  {e.SpEffectId} @ frame {e.Frame:0}  ({how})";
+            });
+            return "TAE SpEffect events:\n" + string.Join("\n", lines);
+        }
+
+        private (float Frame, SpEffectHandler Handler)? ChosenInterrupt(ComboStep s, int depth)
+        {
+            if (!_interrupt.TryGetValue((s.Line, depth), out int k) || k < 0) return null;
+            var c = Candidates(s.AnimId);
+            return k < c.Count ? (c[k].Frame, c[k].Handler) : null;
+        }
+
+        private void DrawInterruptChoice(ComboStep s, int depth)
+        {
+            var c = Candidates(s.AnimId);
+            if (c.Count == 0) return;
+            int k = _interrupt.TryGetValue((s.Line, depth), out int v) ? v : -1;
+            ImGui.SameLine(260);
+            ImGui.SetNextItemWidth(380);
+            string label = k >= 0 && k < c.Count
+                ? $"SpEffect {c[k].SpEffectId} @ frame {c[k].Frame:0} -> Interrupt"
+                : $"{c.Count} SpEffect interrupt(s): continue normally";
+            if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label)) return;
+            try
+            {
+                if (ImGui.Selectable("Continue normally (no interrupt)", k < 0)) { _interrupt[(s.Line, depth)] = -1; _plan = null; }
+                for (int i = 0; i < c.Count; i++)
+                {
+                    var h = c[i].Handler;
+                    string text = $"SpEffect {c[i].SpEffectId} @ frame {c[i].Frame:0} -> Goal.Interrupt line {h.Line + 1}" + (h.ClearsQueue ? " (ClearSubGoal)" : "");
+                    if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _plan = null; }
+                }
+            }
+            finally { ImGui.EndCombo(); }
+        }
+
+        private void Play(List<PathItem> path)
+        {
+            _plan = _app.Bridge.PlayCombo(path.Select(p => (p.Step.AnimId, p.Cut)).ToList());
             if (_plan == null) _app.Notify("Load the character first (Scripts panel → Load model & anims).");
         }
 
@@ -138,8 +231,16 @@ namespace SoulsAiStudio.App
                                 _editor.JumpTo(s.Line);
                                 _app.PlayAnim(s.AnimId);
                             }
-                            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim");
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\n\n" + SpEffectSummary(s.AnimId));
+                            DrawInterruptChoice(s, depth);
                             ImGui.Unindent(depth * 14 + 2);
+                            if (ChosenInterrupt(s, depth) is { } ci && depth < MaxInterruptDepth)
+                            {
+                                ImGui.Indent((depth + 1) * 14 + 2);
+                                ImGui.TextColored(Theme.Warn, $"SpEffect {ci.Handler.SpEffectId} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ci.Handler.ClearsQueue ? ", ClearSubGoal" : ""));
+                                ImGui.Unindent((depth + 1) * 14 + 2);
+                                DrawNodes(ci.Handler.Body, depth + 1);
+                            }
                             break;
                         case ComboClear:
                             ImGui.Indent(depth * 14 + 2);

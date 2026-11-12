@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using DSAnimStudio;
 using DSAnimStudio.TaeEditor;
@@ -89,8 +90,38 @@ namespace SoulsAiStudio.App
         /// start of its "End If AI ComboAttack Queued" window (where the AI's queued ComboRepeat/ComboFinal takes over),
         /// or at its end when it has no such window. Returns what was planned (for display), or null if nothing is loaded.
         /// </summary>
-        public List<ComboPlan>? PlayCombo(IReadOnlyList<int> animIds)
+        public List<ComboPlan>? PlayCombo(IReadOnlyList<int> animIds) =>
+            PlayCombo(animIds.Select(a => (a, (float?)null)).ToList());
+
+        /// <summary>TAE event types that apply a SpEffect (param s32 at 0x0 = SpEffect id) — CLAUDE.md §4.3.</summary>
+        private static readonly int[] SpEffectEventTypes = { 67, 66, 302, 401, 331, 797 };
+
+        /// <summary>SpEffect events in an anim's TAE: (SpEffect id, start frame), sorted by time. Empty if not loaded.</summary>
+        public IReadOnlyList<(int SpEffectId, float Frame)> GetSpEffectEvents(int animId)
         {
+            try
+            {
+                var doc = zzz_DocumentManager.CurrentDocument;
+                var proj = doc?.EditorScreen?.Proj;
+                if (doc == null || proj == null || !doc.EditorScreen.IsFileOpen) return Array.Empty<(int, float)>();
+                var taeAnim = proj.SAFE_GetFirstAnimationFromFullID(SplitAnimID.FromFullID(doc.GameRoot, animId));
+                if (taeAnim == null) return Array.Empty<(int, float)>();
+                float snap = TaeExtensionMethods.GetCurrentSnapInterval();
+                return taeAnim.SAFE_GetActions()
+                    .Where(a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0 && a.ParameterBytes != null && a.ParameterBytes.Length >= 4)
+                    .Select(a => (BitConverter.ToInt32(a.ParameterBytes, 0), a.StartTime / snap))
+                    .OrderBy(x => x.Item2).ToList();
+            }
+            catch (Exception) { return Array.Empty<(int, float)>(); }
+        }
+
+        /// <summary>
+        /// Plays anims back to back. <c>CutFrame</c> forces where an anim ends (e.g. a SpEffect interrupt);
+        /// otherwise it ends at "End If AI ComboAttack Queued" (or its end for the last anim).
+        /// </summary>
+        public List<ComboPlan>? PlayCombo(IReadOnlyList<(int AnimId, float? CutFrame)> steps)
+        {
+            var animIds = steps.Select(s => s.AnimId).ToList();
             var doc = zzz_DocumentManager.CurrentDocument;
             var screen = doc?.EditorScreen;
             var interactor = screen?.Graph?.ViewportInteractor;
@@ -124,6 +155,7 @@ namespace SoulsAiStudio.App
                         if (f < end) { end = f; reason = "ComboAttack Queued"; }
                     }
                 }
+                if (steps[k].CutFrame is float forced && forced < total) { end = Math.Max(0, forced); reason = "SpEffect interrupt"; }
                 plans.Add(new ComboPlan(animIds[k], end, total, reason, Missing: false));
                 entries.Add(new NewCombo.Entry { AnimationID = id, StartFrame = 0, EndFrame = end, BlendDuration = -1, IsLoop = false });
             }

@@ -16,6 +16,9 @@ public sealed class LuaDecompiler(string exePath, string cacheDir)
 
     public bool IsAvailable => File.Exists(exePath);
 
+    /// <summary>Max time per file; the process tree is killed after that.</summary>
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(60);
+
     public async Task<string> DecompileAsync(byte[] bytecode, string fileName, CancellationToken ct = default)
     {
         string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytecode))[..16];
@@ -41,7 +44,18 @@ public sealed class LuaDecompiler(string exePath, string cacheDir)
             using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start DSLuaDecompiler.");
             Task<string> stdout = proc.StandardOutput.ReadToEndAsync(ct);
             Task<string> stderr = proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
+            // Some inputs make the decompiler hang; never wait forever (review S4).
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                timeout.CancelAfter(Timeout);
+                try { await proc.WaitForExitAsync(timeout.Token); }
+                catch (OperationCanceledException)
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                    if (ct.IsCancellationRequested) throw;
+                    throw new TimeoutException($"DSLuaDecompiler did not finish within {Timeout.TotalSeconds:0} s for '{fileName}'.");
+                }
+            }
             string text = await stdout;
             if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(text))
                 throw new InvalidOperationException($"DSLuaDecompiler failed (exit {proc.ExitCode}): {(await stderr).Trim()}");

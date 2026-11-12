@@ -133,3 +133,52 @@ public class ComboSequenceLocalsTests
         Assert.Equal([3020], ComboSequence.Flatten(ComboSequence.Build(src, goal), _ => 0).Select(s => s.AnimId));
     }
 }
+
+public class SpEffectInterruptsTests
+{
+    [RequiresTestDataFact]
+    public void Owl_InterruptTable_Has3506000_WithClearAndRandomBranches()
+    {
+        string src = File.ReadAllText(Samples.OwlBattle);
+        var table = SpEffectInterrupts.Build(src);
+        Assert.True(table.Handlers.Count > 10);
+        var h = table.Handlers[3506000];
+        Assert.True(h.ClearsQueue);
+        Assert.NotEmpty(ComboSequence.Flatten(h.Body, _ => 0));
+        Assert.Contains(3012, ComboSequence.Flatten(h.Body, _ => 0).Select(s => s.AnimId));
+        Assert.True(table.Handlers[3506080].Replans);
+        Assert.Equal("TARGET_ENE_0", table.Observed[110010]);
+        Assert.Equal("TARGET_SELF", table.Observed[5030]);
+    }
+
+    [Fact]
+    public void UserExample_5060040_FourWayRandom()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local interruptRand = arg1:GetRandam_Int(1, 100)
+                local interruptSpeffect = arg1:GetSpecialEffectActivateInterruptType(0)
+                if arg1:IsInterupt(INTERUPT_ActivateSpecialEffect) then
+                    if interruptSpeffect == 1 then
+                        arg1:Replanning()
+                        return true
+                    elseif interruptSpeffect == 5060040 then
+                        arg2:ClearSubGoal()
+                        if interruptRand <= 25 then arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3037, TARGET_ENE_0, 999, 0, 0, 0, 0)
+                        elseif interruptRand <= 50 then arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3018, TARGET_ENE_0, 999, 0, 0, 0, 0)
+                        elseif interruptRand <= 75 then arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3047, TARGET_ENE_0, 999, 0, 0, 0, 0)
+                        else arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3044, TARGET_ENE_0, 999, 0, 0, 0, 0)
+                        end
+                        return true
+                    end
+                end
+                return false
+            end
+            """;
+        var h = SpEffectInterrupts.Build(src).Handlers[5060040];
+        Assert.True(h.ClearsQueue);
+        var branch = Assert.Single(ComboSequence.Branches(h.Body));
+        Assert.Equal([25d, 25d, 25d, 25d], branch.Arms.Select(a => a.Probability!.Value));
+        Assert.Equal([3044], ComboSequence.Flatten(h.Body, _ => 3).Select(s => s.AnimId));
+    }
+}

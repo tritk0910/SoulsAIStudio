@@ -12,7 +12,7 @@ namespace SoulsAiStudio.App
     /// </summary>
     public sealed class SasLayout
     {
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
         public const string ScriptsWindow = "Scripts##sas_scripts";
         public const string EditorWindow = "Lua Editor##sas_editor";
 
@@ -57,10 +57,12 @@ namespace SoulsAiStudio.App
                 igDockBuilderFinish(animNode);
                 igDockBuilderFinish(graphNode);
             }
-            // v2: Combo player as a tab next to Parameters / Log.
+            // v3: Combo player in its own node right of Parameters / Entity / Log, so selecting a TAE event (DSAS focuses
+            // Parameters) never hides it.
             if (paramsNode != 0)
             {
-                igDockBuilderDockWindow(ComboPanel.WindowName, paramsNode);
+                igDockBuilderSplitNode(paramsNode, ImGuiDir.Right, 0.5f, out uint comboNode, out uint _);
+                igDockBuilderDockWindow(ComboPanel.WindowName, comboNode);
                 igDockBuilderFinish(paramsNode);
             }
 
