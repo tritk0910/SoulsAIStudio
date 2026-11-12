@@ -106,7 +106,7 @@ namespace SoulsAiStudio.App
 
             ImGui.Separator();
             ImGui.BeginChild("##sas_combo_tree", new Vector2(0, _plan != null ? -110 : 0), false);
-            try { DrawNodes(_nodes, 0); }
+            try { DrawNodes(_nodes, 0, 0); }
             finally { ImGui.EndChild(); }
 
             if (_plan != null) DrawPlan();
@@ -116,7 +116,7 @@ namespace SoulsAiStudio.App
 
         private void RollRandom()
         {
-            foreach (var b in ComboSequence.Branches(_nodes))
+            foreach (var b in ComboSequence.Branches(_nodes).Concat(_handlers?.Handlers.Values.SelectMany(h => ComboSequence.Branches(h.Body)) ?? Enumerable.Empty<ComboBranch>()))
             {
                 var weights = b.Arms.Select(a => a.Probability ?? 100.0 / b.Arms.Count).ToArray();
                 double roll = _rng.NextDouble() * weights.Sum(), acc = 0;
@@ -215,11 +215,12 @@ namespace SoulsAiStudio.App
             if (_plan == null) _app.Notify("Load the character first (Scripts panel → Load model & anims).");
         }
 
-        private void DrawNodes(IReadOnlyList<ComboNode> nodes, int depth)
+        private void DrawNodes(IReadOnlyList<ComboNode> nodes, int depth, int level)
         {
+            // depth = indent; level = SpEffect interrupt nesting (key of _interrupt, same as BuildPath).
             foreach (var n in nodes)
             {
-                ImGui.PushID(n.Line * 31 + depth);
+                ImGui.PushID(n.Line * 31 + depth * 7 + level);
                 try
                 {
                     switch (n)
@@ -232,14 +233,14 @@ namespace SoulsAiStudio.App
                                 _app.PlayAnim(s.AnimId);
                             }
                             if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\n\n" + SpEffectSummary(s.AnimId));
-                            DrawInterruptChoice(s, depth);
+                            DrawInterruptChoice(s, level);
                             ImGui.Unindent(depth * 14 + 2);
-                            if (ChosenInterrupt(s, depth) is { } ci && depth < MaxInterruptDepth)
+                            if (ChosenInterrupt(s, level) is { } ci && level < MaxInterruptDepth)
                             {
                                 ImGui.Indent((depth + 1) * 14 + 2);
                                 ImGui.TextColored(Theme.Warn, $"SpEffect {ci.Handler.SpEffectId} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ci.Handler.ClearsQueue ? ", ClearSubGoal" : ""));
                                 ImGui.Unindent((depth + 1) * 14 + 2);
-                                DrawNodes(ci.Handler.Body, depth + 1);
+                                DrawNodes(ci.Handler.Body, depth + 1, level + 1);
                             }
                             break;
                         case ComboClear:
@@ -261,7 +262,7 @@ namespace SoulsAiStudio.App
                                 finally { ImGui.EndCombo(); }
                             }
                             ImGui.Unindent(depth * 14 + 2);
-                            DrawNodes(b.Arms[chosen].Body, depth + 1);
+                            DrawNodes(b.Arms[chosen].Body, depth + 1, level);
                             break;
                     }
                 }
