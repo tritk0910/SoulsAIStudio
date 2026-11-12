@@ -330,6 +330,15 @@ namespace DSAnimStudio
 
 
             }
+            // [SAS] Live Blend window (start/end of the TAE Blend event, type 16), read every frame by NewAnimSlot so the
+            // preview blends over exactly the block's span like DSAS 4.9.9. Returns end < 0 when there's no Blend event.
+            public (float Start, float End) SAFE_GetBlendWindow() => SAFE(() =>
+            {
+                foreach (var a in Actions)
+                    if (a.Type == 16) return (a.StartTime, a.EndTime);
+                return (0f, -1f);
+            });
+
             public float SAFE_GetBlendDuration()
             {
                 if (ParentProj != null)

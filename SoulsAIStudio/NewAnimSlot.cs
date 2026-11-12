@@ -400,6 +400,16 @@ namespace DSAnimStudio
                 
                 float blend = (CurrentRequest.BlendDuration > 0)
                     ? ((ForegroundAnimation.CurrentTimeUnlooped - startTime) / blendDuration) : 1;
+
+                // [SAS] Like DSAS 4.9.9: when the blend comes from the TAE, follow the Blend event's live start/end every
+                // frame (dragging/stretching the block changes the preview immediately) instead of a length snapshotted
+                // when the anim started.
+                if (CurrentRequest.BlendDuration > 0 && ForegroundAnimation.TaeAnimation != null)
+                {
+                    var (bStart, bEnd) = ForegroundAnimation.TaeAnimation.SAFE_GetBlendWindow();
+                    if (bEnd > bStart)
+                        blend = (ForegroundAnimation.CurrentTimeUnlooped - bStart) / (bEnd - bStart);
+                }
                 
                 if (blend < 0)
                     blend = 0;
