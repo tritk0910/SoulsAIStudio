@@ -18,7 +18,7 @@ namespace DSAnimStudio.ImguiOSD
             {
                 isAnyMenuExpanded = true;
 
-                DoWindow(OSD.WindowComboViewer, "F8");
+                SoulsAiStudio.App.SasHooks.ComboMenuItem(); // [SAS] DSAS Combo Viewer replaced by the Souls AI Combo window (Manual tab)
 
 
                 if (Main.IsDebugBuild)

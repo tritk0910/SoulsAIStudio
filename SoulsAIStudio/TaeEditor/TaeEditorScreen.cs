@@ -3919,7 +3919,7 @@ namespace DSAnimStudio.TaeEditor
 
                 if (Input.KeyDown(Microsoft.Xna.Framework.Input.Keys.F8))
                 {
-                    OSD.WindowComboViewer.IsOpen = !OSD.WindowComboViewer.IsOpen;
+                    SoulsAiStudio.App.SasHooks.OpenComboScript(); // [SAS] F8 opens the Souls AI combo script instead of DSAS's Combo Viewer
                 }
 
 

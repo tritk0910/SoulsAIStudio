@@ -75,6 +75,22 @@ namespace SoulsAiStudio.App
             try { App.TrackSoundVolume(volume); } catch (Exception ex) { App.ReportError("Sound volume", ex); }
         }
 
+        /// <summary>DSAS's Combo Viewer is replaced by the Manual tab of the Souls AI Combo window: never drawn.</summary>
+        public const bool HideDsasComboViewer = true;
+
+        /// <summary>Tools menu entry replacing DSAS's "Combo Viewer" item.</summary>
+        public static void ComboMenuItem()
+        {
+            try { if (ImGuiNET.ImGui.MenuItem("Combo (Manual script)", "F8")) App.OpenComboManual(); }
+            catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
+        /// <summary>F8 (was DSAS's Combo Viewer toggle).</summary>
+        public static void OpenComboScript()
+        {
+            try { App.OpenComboManual(); } catch (Exception ex) { App.ReportError("Combo", ex); }
+        }
+
         /// <summary>Called at the end of DSAS's "Window" menu.</summary>
         public static void BuildWindowMenuItems()
         {

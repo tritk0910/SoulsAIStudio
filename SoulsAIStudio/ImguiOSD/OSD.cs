@@ -471,6 +471,7 @@ namespace DSAnimStudio.ImguiOSD
 
                     SpWindowNotifications.Update(ref actualFocusedWindow, ref anyFieldFocused);
 
+                    if (!SoulsAiStudio.App.SasHooks.HideDsasComboViewer) // [SAS] replaced by the Souls AI Combo window
                     WindowComboViewer.Update(ref actualFocusedWindow, ref currentFocusedWindow, ref anyWindowHovered,
                         ref anyFieldFocused);
 

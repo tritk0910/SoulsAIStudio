@@ -5,6 +5,7 @@ using System.Linq;
 using System.IO;
 using DSAnimStudio;
 using DSAnimStudio.TaeEditor;
+using SoulsAiStudio.Core.Combo;
 using SoulsAiStudio.Core.IO;
 using SoulsAiStudio.Core.Project;
 
@@ -79,25 +80,38 @@ namespace SoulsAiStudio.App
             return true;
         }
 
-        /// <summary>One played combo step and where it was cut.</summary>
-        public sealed record ComboPlan(int AnimId, float EndFrame, float TotalFrames, string CutReason, bool Missing);
+        /// <summary>One combo step as planned: frames StartFrame–EndFrame of TotalFrames (TAE frames), and why it ends there.</summary>
+        /// <param name="Warn">The requested cut was not found in the TAE, so the anim plays to its end.</param>
+        public sealed record ComboPlan(int AnimId, float EndFrame, float TotalFrames, string CutReason, bool Missing, float StartFrame = 0, bool Warn = false);
+
+        /// <summary>One anim to play and how it ends. ForcedCut/EndFrame (TAE frames) win over Cut.</summary>
+        public sealed record ComboRequest(int AnimId, ComboCut Cut, float? ForcedCut = null, string? ForcedReason = null,
+            float? StartFrame = null, float? EndFrame = null);
 
         /// <summary>FlagType of the Sekiro JumpTable event (TAE type 0) "End If AI ComboAttack Queued".</summary>
         public const int JumpTableEventType = 0, ComboAttackQueuedFlag = 23;
-
-        /// <summary>
-        /// Plays <paramref name="animIds"/> back to back with DSAS's combo player. Every anim except the last is cut at the
-        /// start of its "End If AI ComboAttack Queued" window (where the AI's queued ComboRepeat/ComboFinal takes over),
-        /// or at its end when it has no such window. Returns what was planned (for display), or null if nothing is loaded.
-        /// </summary>
-        public List<ComboPlan>? PlayCombo(IReadOnlyList<int> animIds) =>
-            PlayCombo(animIds.Select(a => (a, (float?)null)).ToList());
 
         /// <summary>TAE event types that apply a SpEffect (param s32 at 0x0 = SpEffect id) — CLAUDE.md §4.3.</summary>
         private static readonly int[] SpEffectEventTypes = { 67, 66, 302, 401, 331, 797 };
 
         /// <summary>SpEffect events in an anim's TAE: (SpEffect id, start frame), sorted by time. Empty if not loaded.</summary>
-        public IReadOnlyList<(int SpEffectId, float Frame)> GetSpEffectEvents(int animId)
+        public IReadOnlyList<(int SpEffectId, float Frame)> GetSpEffectEvents(int animId) =>
+            Events(animId, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0);
+
+        /// <summary>JumpTable flags in an anim's TAE: (flag, start frame), sorted by time. Empty if not loaded.</summary>
+        public IReadOnlyList<(int Flag, float Frame)> GetJumpTableEvents(int animId) =>
+            Events(animId, a => a.Type == JumpTableEventType);
+
+        /// <summary>Start frame of the anim's "End If AI ComboAttack Queued" window (where a queued next anim takes over), or null.</summary>
+        public float? GetComboQueuedFrame(int animId)
+        {
+            foreach (var (flag, frame) in GetJumpTableEvents(animId))
+                if (flag == ComboAttackQueuedFlag) return frame;
+            return null;
+        }
+
+        /// <summary>(s32 at 0x0, start frame) of the matching events of an anim, sorted by time.</summary>
+        private static IReadOnlyList<(int Value, float Frame)> Events(int animId, Func<DSAProj.Action, bool> match)
         {
             try
             {
@@ -108,44 +122,25 @@ namespace SoulsAiStudio.App
                 if (taeAnim == null) return Array.Empty<(int, float)>();
                 float snap = TaeExtensionMethods.GetCurrentSnapInterval();
                 return taeAnim.SAFE_GetActions()
-                    .Where(a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0 && a.ParameterBytes != null && a.ParameterBytes.Length >= 4)
+                    .Where(a => match(a) && a.ParameterBytes != null && a.ParameterBytes.Length >= 4)
                     .Select(a => (BitConverter.ToInt32(a.ParameterBytes, 0), a.StartTime / snap))
                     .OrderBy(x => x.Item2).ToList();
             }
             catch (Exception) { return Array.Empty<(int, float)>(); }
         }
 
-        /// <summary>Start frame of the anim's "End If AI ComboAttack Queued" window (where a queued next anim takes over), or null.</summary>
-        public float? GetComboQueuedFrame(int animId)
-        {
-            try
-            {
-                var doc = zzz_DocumentManager.CurrentDocument;
-                var proj = doc?.EditorScreen?.Proj;
-                if (doc == null || proj == null || !doc.EditorScreen.IsFileOpen) return null;
-                var taeAnim = proj.SAFE_GetFirstAnimationFromFullID(SplitAnimID.FromFullID(doc.GameRoot, animId));
-                if (taeAnim == null) return null;
-                float snap = TaeExtensionMethods.GetCurrentSnapInterval();
-                float? best = null;
-                foreach (var act in taeAnim.SAFE_GetActions())
-                {
-                    if (act.Type != JumpTableEventType || act.ParameterBytes == null || act.ParameterBytes.Length < 4) continue;
-                    if (BitConverter.ToInt32(act.ParameterBytes, 0) != ComboAttackQueuedFlag) continue;
-                    float f = act.StartTime / snap;
-                    if (best == null || f < best) best = f;
-                }
-                return best;
-            }
-            catch (Exception) { return null; }
-        }
-
         /// <summary>
-        /// Plays anims back to back. <c>CutFrame</c> forces where an anim ends (e.g. a SpEffect interrupt);
-        /// otherwise it ends at "End If AI ComboAttack Queued" (or its end for the last anim).
+        /// Lua combo path: every anim except the last is cut at "End If AI ComboAttack Queued" (or its end), unless
+        /// <c>CutFrame</c> forces a SpEffect interrupt cut.
         /// </summary>
-        public List<ComboPlan>? PlayCombo(IReadOnlyList<(int AnimId, float? CutFrame)> steps)
+        public List<ComboPlan>? PlayCombo(IReadOnlyList<(int AnimId, float? CutFrame)> steps) =>
+            PlayCombo(steps.Select((s, i) => new ComboRequest(s.AnimId,
+                i < steps.Count - 1 ? ComboCut.ComboAttackQueued : ComboCut.NoCancel,
+                s.CutFrame, s.CutFrame != null ? "SpEffect interrupt" : null)).ToList());
+
+        /// <summary>Resolves (and with <paramref name="play"/> plays) a combo. Null when no character is loaded.</summary>
+        public List<ComboPlan>? PlayCombo(IReadOnlyList<ComboRequest> steps, bool play = true)
         {
-            var animIds = steps.Select(s => s.AnimId).ToList();
             var doc = zzz_DocumentManager.CurrentDocument;
             var screen = doc?.EditorScreen;
             var interactor = screen?.Graph?.ViewportInteractor;
@@ -155,41 +150,68 @@ namespace SoulsAiStudio.App
             float snap = TaeExtensionMethods.GetCurrentSnapInterval();
             var plans = new List<ComboPlan>();
             var entries = new List<NewCombo.Entry>();
-            for (int k = 0; k < animIds.Count; k++)
+            foreach (var req in steps)
             {
-                var id = SplitAnimID.FromFullID(doc!.GameRoot, animIds[k]);
+                var id = SplitAnimID.FromFullID(doc!.GameRoot, req.AnimId);
                 var taeAnim = screen.Proj.SAFE_GetFirstAnimationFromFullID(id);
                 var hkx = taeAnim == null ? null : container.FindAnimation(taeAnim.GetHkxID(screen.Proj), returnNewInstance: false);
                 if (taeAnim == null || hkx == null)
                 {
-                    plans.Add(new ComboPlan(animIds[k], 0, 0, "not in this anibnd", Missing: true));
+                    plans.Add(new ComboPlan(req.AnimId, 0, 0, "not in this anibnd", Missing: true));
                     continue;
                 }
 
                 // In TAE frames (snap = 1/30 s for Sekiro). Not hkx.FrameCount: some HKX are 60 fps (e.g. Owl 3048 = 213 frames,
                 // 3.53 s), which made the combo hold/loop the last anim for twice its length.
                 float total = Math.Max(1, (float)Math.Round(hkx.Duration / snap));
+                float start = Math.Clamp(req.StartFrame ?? 0, 0, total);
                 float end = total;
                 string reason = "anim end";
-                if (k < animIds.Count - 1)
+                bool warn = false;
+                if (req.EndFrame is float ef) { end = ef; reason = "end frame (script)"; }
+                else if (req.ForcedCut is float fc) { end = fc; reason = req.ForcedReason ?? "forced cut"; }
+                else if (req.Cut.SpEffectId is int sp)
                 {
-                    foreach (var act in taeAnim.SAFE_GetActions())
-                    {
-                        if (act.Type != JumpTableEventType || act.ParameterBytes == null || act.ParameterBytes.Length < 4) continue;
-                        if (BitConverter.ToInt32(act.ParameterBytes, 0) != ComboAttackQueuedFlag) continue;
-                        float f = act.StartTime / snap;
-                        if (f < end) { end = f; reason = "ComboAttack Queued"; }
-                    }
+                    float? f = FirstFrame(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp);
+                    if (f is float sf) { end = sf; reason = $"SpEffect {sp}"; }
+                    else { reason = $"SpEffect {sp} not in TAE → anim end"; warn = true; }
                 }
-                if (steps[k].CutFrame is float forced && forced < total) { end = Math.Max(0, forced); reason = "SpEffect interrupt"; }
-                plans.Add(new ComboPlan(animIds[k], end, total, reason, Missing: false));
-                entries.Add(new NewCombo.Entry { AnimationID = id, StartFrame = 0, EndFrame = end, BlendDuration = -1, IsLoop = false });
+                else if (req.Cut.JumpTableFlag >= 0)
+                {
+                    float? f = FirstFrame(taeAnim, snap, a => a.Type == JumpTableEventType, req.Cut.JumpTableFlag);
+                    string name = req.Cut.JumpTableFlag == ComboAttackQueuedFlag ? "ComboAttack Queued" : $"JumpTable {req.Cut.JumpTableFlag}";
+                    if (f is float jf) { end = jf; reason = name; }
+                    else { reason = $"no {name} → anim end"; warn = true; }
+                }
+                end = Math.Clamp(end, start, total);
+                plans.Add(new ComboPlan(req.AnimId, end, total, reason, Missing: false, start, warn));
+                entries.Add(new NewCombo.Entry { AnimationID = id, StartFrame = start, EndFrame = end, BlendDuration = -1, IsLoop = false });
             }
 
-            if (entries.Count == 0) return plans;
+            if (!play || entries.Count == 0) return plans;
             if (screen.PlaybackCursor != null) screen.PlaybackCursor.IsPlaying = false;
             interactor.RequestCombo(entries);
             return plans;
+        }
+
+        private static float? FirstFrame(DSAProj.Animation taeAnim, float snap, Func<DSAProj.Action, bool> match, int value)
+        {
+            float? best = null;
+            foreach (var act in taeAnim.SAFE_GetActions())
+                if (match(act) && act.ParameterBytes is { Length: >= 4 } pb && BitConverter.ToInt32(pb, 0) == value
+                    && (best == null || act.StartTime / snap < best))
+                    best = act.StartTime / snap;
+            return best;
+        }
+
+        /// <summary>True once a combo has played to its last entry's end (not when stopped or never started).</summary>
+        public bool ComboFinished
+        {
+            get
+            {
+                try { return zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.Combo?.PlaybackState == NewCombo.PlaybackStates.Finished; }
+                catch (Exception) { return false; }
+            }
         }
 
         /// <summary>Pauses/resumes the combo that is playing. Returns false when no combo is active.</summary>

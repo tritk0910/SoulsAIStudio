@@ -296,6 +296,16 @@ namespace SoulsAiStudio.App
 
         // ---------- notifications / errors ----------
 
+        /// <summary>Text of the Lua script open in the editor (null if none).</summary>
+        public string? ActiveScriptText => _editor.Active?.Editor.Text;
+
+        /// <summary>Tools → Combo / F8: the Combo window's Manual tab (replaces DSAS's Combo Viewer).</summary>
+        public void OpenComboManual()
+        {
+            if (Session == null) { Notify("Open a Souls AI project first: the combo player lives in its Combo window."); return; }
+            _combo.OpenManual();
+        }
+
         public void Notify(string text) => DSAnimStudio.zzz_NotificationManagerIns.PushNotification(text);
 
         public void ReportError(string what, Exception? ex)

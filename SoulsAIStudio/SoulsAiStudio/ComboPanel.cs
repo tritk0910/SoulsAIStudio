@@ -4,15 +4,16 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using ImGuiNET;
+using SoulsAiStudio.Core.Combo;
 using SoulsAiStudio.Core.Lua.Analysis;
 
 namespace SoulsAiStudio.App
 {
     /// <summary>
-    /// Combo player (CLAUDE.md P2, first step): shows the AddSubGoal sequence of the goal under the cursor with its
-    /// if/elseif/else branches (random % where known), lets the user pick a path (or roll Random), and plays it in the
-    /// viewport through DSAS's combo player, cutting each anim at "End If AI ComboAttack Queued".
-    /// Not yet: SpEffect / OnHit interrupt branches (needs TAE SpEffect index + params).
+    /// Combo window (CLAUDE.md P2). Tab "From Lua": the AddSubGoal sequence of the goal under the cursor with its
+    /// if/elseif/else branches and SpEffect interrupt branches; pick a path (or Random) and play it, each anim cut at
+    /// "End If AI ComboAttack Queued" or at the chosen SpEffect. Tab "Manual": a typed combo script
+    /// (<see cref="ComboScriptTab"/>, replaces DSAS's Combo Viewer). Not yet: OnHit SpEffect sources (needs params).
     /// </summary>
     public sealed class ComboPanel
     {
@@ -32,11 +33,29 @@ namespace SoulsAiStudio.App
         private bool _follow = true;
         private List<DsasBridge.ComboPlan>? _plan;
         public bool IsOpen = true;
+        private readonly ComboScriptTab _manual;
+        private bool _selectManual;
 
         public ComboPanel(SasApp app, LuaEditorPanel editor)
         {
             _app = app;
             _editor = editor;
+            _manual = new ComboScriptTab(app, id => _handlers != null && _handlers.Handlers.TryGetValue(id, out var h) && !h.Replans ? h : null);
+        }
+
+        /// <summary>BeginTabItem with flags but without a close button (ImGui.NET 1.87 only has the p_open overload).</summary>
+        private static unsafe bool BeginTabItem(string label, ImGuiTabItemFlags flags)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(label + "\0");
+            fixed (byte* p = bytes) return ImGuiNative.igBeginTabItem(p, null, flags) != 0;
+        }
+
+        /// <summary>Opens the window on the Manual tab (Tools menu / F8, replacing DSAS's Combo Viewer).</summary>
+        public void OpenManual()
+        {
+            IsOpen = true;
+            _selectManual = true;
+            ImGui.SetWindowFocus(WindowName);
         }
 
         /// <returns>True when the window has focus.</returns>
@@ -53,7 +72,18 @@ namespace SoulsAiStudio.App
                 if (!visible) return false;
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
                 Refresh();
-                BuildContents();
+                if (ImGui.BeginTabBar("##sas_combo_tabs"))
+                {
+                    if (ImGui.BeginTabItem("From Lua")) { BuildContents(); ImGui.EndTabItem(); }
+                    if (BeginTabItem("Manual", _selectManual ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                    {
+                        _manual.Build();
+                        ImGui.EndTabItem();
+                    }
+                    _selectManual = false;
+                    ImGui.EndTabBar();
+                }
+                _manual.Tick();
             }
             finally { ImGui.End(); }
             return focused;
@@ -101,6 +131,13 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             if (ImGui.Button("■ Stop")) { _app.Bridge.StopCombo(); }
             ImGui.SameLine();
+            if (ImGui.Button("→ Manual") && path.Count > 0)
+            {
+                _manual.SetText($"# From Lua: Goal.{_goal.Name} (line {_goal.Line + 1})\n" + ComboScript.Format(path.Select(p =>
+                    (p.Step.AnimId, p.SpEffectId is int sp ? new ComboCut(-1, sp) : ComboCut.ComboAttackQueued)).ToList()));
+                _selectManual = true;
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy this path (with its SpEffect interrupts) into the Manual tab as a combo script to edit");
             ImGui.TextDisabled(path.Count == 0 ? "no anims in this path"
                 : string.Join(" → ", path.Select(p => p.Cut != null ? p.Step.AnimId + " (SpEffect cut)" : p.Step.AnimId.ToString())));
 
@@ -158,7 +195,7 @@ namespace SoulsAiStudio.App
         }
 
         /// <summary>A step on the played path; Cut = frame where a chosen SpEffect interrupt cuts it.</summary>
-        private sealed record PathItem(ComboStep Step, float? Cut);
+        private sealed record PathItem(ComboStep Step, float? Cut, int? SpEffectId = null);
 
         /// <summary>
         /// Flattens the chosen branches; where the user picked a SpEffect interrupt on a step, that anim is cut at the
@@ -175,7 +212,7 @@ namespace SoulsAiStudio.App
                 var chosen = ChosenInterrupt(s, depth);
                 if (chosen == null || depth >= MaxInterruptDepth) { result.Add(new PathItem(s, null)); continue; }
                 var (frame, handler) = chosen.Value;
-                result.Add(new PathItem(s, frame));
+                result.Add(new PathItem(s, frame, handler.SpEffectId));
                 var rest = BuildPath(handler.Body, depth + 1);
                 if (handler.ClearsQueue) { result.AddRange(rest); return result; }
                 (appendAfter ??= new()).AddRange(rest);
@@ -253,6 +290,7 @@ namespace SoulsAiStudio.App
 
         private void Play(List<PathItem> path)
         {
+            _manual.StopLooping();
             _plan = _app.Bridge.PlayCombo(path.Select(p => (p.Step.AnimId, p.Cut)).ToList());
             if (_plan == null) _app.Notify("Load the character first (Scripts panel → Load model & anims).");
         }

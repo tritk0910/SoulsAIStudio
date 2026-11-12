@@ -22,6 +22,9 @@ namespace SoulsAiStudio.App
 
         /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
         public float SoundVolume { get; set; } = 100;
+        /// <summary>Last text of the Combo window's Manual tab (null = show the example).</summary>
+        public string? ComboScript { get; set; }
+        public bool ComboScriptLoop { get; set; }
         /// <summary>Blend root motion between anims during a TAE Blend (DSAS 4.9.9 behavior). See SasHooks.RootMotionBlending.</summary>
         public bool BlendRootMotion { get; set; } = true;
 
