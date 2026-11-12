@@ -199,11 +199,11 @@ namespace SoulsAiStudio.App
             var c = Candidates(s.AnimId);
             if (c.Count == 0) return;
             int k = _interrupt.TryGetValue((s.Line, depth), out int v) ? v : -1;
-            ImGui.SameLine(260);
-            ImGui.SetNextItemWidth(380);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
             string label = k >= 0 && k < c.Count
-                ? $"SpEffect {c[k].SpEffectId} @ frame {c[k].Frame:0} -> Interrupt"
-                : $"{c.Count} SpEffect interrupt(s): continue normally";
+                ? $"SpEffect {c[k].SpEffectId} @ f{c[k].Frame:0} ({c[k].Frame / 30f:0.00} s) -> Interrupt"
+                : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available)";
             if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label)) return;
             try
             {
@@ -238,7 +238,8 @@ namespace SoulsAiStudio.App
                     {
                         case ComboStep s:
                             ImGui.Indent(depth * 14 + 2);
-                            if (ImGui.Selectable($"{s.AnimId}   {ShortGoal(s.GoalType)}##step{s.Line}"))
+                            if (ImGui.Selectable($"{s.AnimId}   {ShortGoal(s.GoalType)}##step{s.Line}", false, ImGuiSelectableFlags.None,
+                                    new Vector2(Candidates(s.AnimId).Count > 0 ? 210 : 0, 0)))
                             {
                                 _editor.JumpTo(s.Line);
                                 _app.PlayAnim(s.AnimId);

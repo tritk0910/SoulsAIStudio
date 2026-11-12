@@ -185,7 +185,7 @@ namespace SoulsAiStudio.App
         }
 
         /// <summary>
-        /// Space pauses/resumes a combo started from the Combo panel (DSAS's own Space only toggles normal playback,
+        /// Space pauses/resumes a combo started from the Combo panel, or normal playback when DSAS ignores Space because a panel has focus (DSAS's own Space only toggles normal playback,
         /// which the combo overrides every frame). Ignored while typing in a text field / the Lua editor.
         /// </summary>
         private void HandleComboSpace()
@@ -196,6 +196,11 @@ namespace SoulsAiStudio.App
             // Only typing contexts block it: the Lua editor, or any active ImGui text field (not merely a focused panel).
             if (!pressed || _editor.HadKeyboardFocus || ImGui.IsAnyItemActive() || !DSAnimStudio.Main.Active) return;
             if (Bridge.ToggleComboPause()) Notify(Bridge.ComboPaused ? "Combo paused (Space to resume)" : "Combo resumed");
+            // DSAS skips its own Space (transport play/pause) while an ImGui panel such as Combo has focus
+            // (OSD.AnyFieldFocused, the value its Update used this frame) → do it for normal playback here.
+            else if (DSAnimStudio.ImguiOSD.OSD.AnyFieldFocused && !Microsoft.Xna.Framework.Input.Keyboard.GetState().IsKeyDown(Microsoft.Xna.Framework.Input.Keys.LeftShift)
+                     && !Microsoft.Xna.Framework.Input.Keyboard.GetState().IsKeyDown(Microsoft.Xna.Framework.Input.Keys.LeftControl))
+                Bridge.TogglePlayback();
         }
 
         // ---------- DSAS integration: Window menu, sound volume ----------

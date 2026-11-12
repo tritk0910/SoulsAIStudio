@@ -7,8 +7,8 @@ using ImGuiNET;
 namespace SoulsAiStudio.App
 {
     /// <summary>
-    /// "Follow playhead while scrubbing" for DSAS's TAE graph (like video editors): while the user drags the time
-    /// cursor, the graph scrolls so the playhead stays in the middle of the visible timeline.
+    /// Time-cursor dragging in DSAS's TAE graph. Default (off): DSAS 4.9.9 behavior, edge scroll only (see EdgeScroll).
+    /// "Center playhead while scrubbing" (on, like video editors): the graph scrolls so the playhead stays centered.
     /// <para>
     /// DSAS maps the mouse X to an absolute time. If we also re-centered the scroll on that time, every scroll step
     /// would move the time under a still mouse → runaway scrolling. So with follow ON, only the first frame of the
@@ -28,11 +28,11 @@ namespace SoulsAiStudio.App
 
         public bool Enabled
         {
-            get => _settings.FollowPlayheadWhileScrubbing;
+            get => _settings.CenterPlayheadWhileScrubbing;
             set
             {
-                if (_settings.FollowPlayheadWhileScrubbing == value) return;
-                _settings.FollowPlayheadWhileScrubbing = value;
+                if (_settings.CenterPlayheadWhileScrubbing == value) return;
+                _settings.CenterPlayheadWhileScrubbing = value;
                 _settings.Save();
             }
         }
@@ -54,19 +54,45 @@ namespace SoulsAiStudio.App
         /// (then DSAS's own edge-zone auto-scroll is skipped).</summary>
         public bool CenterOnPlayhead(NewGraph graph, FancyInputHandler input)
         {
-            if (!ActiveFor(input) || graph?.LayoutManager == null) return false;
-            graph.LayoutManager.ScrollToPlaybackCursor(EaseFactor, modTime: false, clampTime: true);
+            if (graph?.LayoutManager == null || graph.ScrollViewer == null) return false;
+            if (ActiveFor(input))
+            {
+                graph.LayoutManager.ScrollToPlaybackCursor(EaseFactor, modTime: false, clampTime: true);
+                return true;
+            }
+            EdgeScroll(graph, input);
             return true;
+        }
+
+        /// <summary>
+        /// DSAS 4.9.9-style drag (default): the playhead stays under the mouse and the timeline does not move,
+        /// except when the mouse is dragged past the left/right edge of the track area; then it scrolls, faster the
+        /// further out the mouse is. (DSAS 5.0 instead starts re-centering on the playhead once the mouse passes 60%.)
+        /// </summary>
+        private static void EdgeScroll(NewGraph graph, FancyInputHandler input)
+        {
+            const float EdgeMargin = 12, MinStep = 4, StepPerPixel = 0.25f, MaxStep = 80;
+            var area = graph.WholeScrollViewerRect;
+            float left = area.Left + EdgeMargin;
+            float right = area.Right - EdgeMargin;
+            float x = input.MousePosition.X;
+            float step = 0;
+            if (x > right) step = Math.Min(MaxStep, MinStep + (x - right) * StepPerPixel);
+            else if (x < left) step = -Math.Min(MaxStep, MinStep + (left - x) * StepPerPixel);
+            if (step == 0) return;
+            graph.ScrollViewer.Scroll.X += step;
+            graph.ScrollViewer.ClampScroll();
         }
 
         /// <summary>Menu entry (Action Graph menu, and optionally the Souls AI menu).</summary>
         public void MenuItem()
         {
-            if (ImGui.MenuItem("Follow Playhead While Scrubbing", "", Enabled))
+            if (ImGui.MenuItem("Center Playhead While Scrubbing", "", Enabled))
                 Enabled = !Enabled;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("While dragging the time cursor, keep the playhead centered in the timeline.\n" +
-                                 "Hold Shift while dragging to scrub the old way (no follow).");
+                ImGui.SetTooltip("On: while dragging the time cursor, keep the playhead centered and scroll the timeline under it.\n" +
+                                 "Off (default, like DSAS 4.9.9): the cursor follows the mouse; the timeline only scrolls\n" +
+                                 "when you drag past its left/right edge. Hold Shift while dragging: no auto-scroll.");
         }
     }
 }

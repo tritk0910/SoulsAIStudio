@@ -179,6 +179,9 @@ namespace SoulsAiStudio.App
             catch (Exception) { return false; }
         }
 
+        /// <summary>Play/pause of normal (non-combo) playback, same as DSAS's transport button.</summary>
+        public void TogglePlayback() => Safe(() => { zzz_DocumentManager.CurrentDocument?.EditorScreen?.PlaybackCursor?.Transport_PlayPause(); return ""; });
+
         public bool ComboPaused
         {
             get

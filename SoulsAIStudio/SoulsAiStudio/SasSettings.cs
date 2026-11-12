@@ -24,7 +24,7 @@ namespace SoulsAiStudio.App
         public float SoundVolume { get; set; } = 100;
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
-        public bool FollowPlayheadWhileScrubbing { get; set; } = true;
+        public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies
 
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the
