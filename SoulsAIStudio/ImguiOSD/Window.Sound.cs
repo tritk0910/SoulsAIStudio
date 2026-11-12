@@ -35,6 +35,7 @@ namespace DSAnimStudio.ImguiOSD
                 ImGui.Button("Reset to 100%");
                 if (ImGui.IsItemClicked())
                     zzz_DocumentManager.CurrentDocument.SoundManager.AdjustSoundVolume = 100;
+                SoulsAiStudio.App.SasHooks.TrackSoundVolume(zzz_DocumentManager.CurrentDocument.SoundManager.AdjustSoundVolume); // [SAS] persist volume
                 
 
                 var document = MainDoc;

@@ -181,6 +181,24 @@ namespace SoulsAiStudio.App
             ImGui.EndMenu();
         }
 
+        // ---------- DSAS integration: Window menu, sound volume ----------
+
+        public void BuildWindowMenuItems()
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Souls AI");
+            if (ImGui.MenuItem("Scripts", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
+            if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
+            if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
+        }
+
+        public void TrackSoundVolume(float volume)
+        {
+            if (Math.Abs(volume - Settings.SoundVolume) < 0.001f || ImGui.IsMouseDown(ImGuiMouseButton.Left)) return;
+            Settings.SoundVolume = Math.Clamp(volume, 0, 200);
+            Settings.Save();
+        }
+
         // ---------- characters (model + animations in DSAS) ----------
 
         public SoulsAiStudio.Core.Project.CharacterFiles? ResolveCharacter(ProjectScript script) =>

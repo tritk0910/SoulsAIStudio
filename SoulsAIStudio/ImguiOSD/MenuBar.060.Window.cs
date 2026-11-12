@@ -50,6 +50,7 @@ namespace DSAnimStudio.ImguiOSD
                         OSD.WindowDebug.IsOpen = false;
                 }
 
+                SoulsAiStudio.App.SasHooks.BuildWindowMenuItems(); // [SAS] Scripts / Lua Editor / Combo Player
                 ImGui.EndMenu();
             }
 

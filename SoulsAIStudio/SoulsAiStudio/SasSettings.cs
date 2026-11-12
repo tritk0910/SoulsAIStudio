@@ -20,6 +20,9 @@ namespace SoulsAiStudio.App
         /// <summary>Keep the Windows IME active in the Lua editor (default off: its composition text isn't drawn).</summary>
         public bool AllowImeInEditor { get; set; }
 
+        /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
+        public float SoundVolume { get; set; } = 100;
+
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the
         /// real profile; note <see cref="Environment.GetFolderPath"/> ignores the APPDATA variable).

@@ -42,6 +42,21 @@ namespace SoulsAiStudio.App
             try { App.Bridge.BeforeOpenRecent(doc, container); } catch (Exception ex) { App.ReportError("Load hook", ex); }
         }
 
+        /// <summary>Initial sound volume for each new DSAS document (DSAS kept it per document and reset it to 100).</summary>
+        public static float SavedSoundVolume => App.Settings.SoundVolume;
+
+        /// <summary>Called every frame by DSAS's Sound window; persists the volume once the user stops dragging.</summary>
+        public static void TrackSoundVolume(float volume)
+        {
+            try { App.TrackSoundVolume(volume); } catch (Exception ex) { App.ReportError("Sound volume", ex); }
+        }
+
+        /// <summary>Called at the end of DSAS's "Window" menu.</summary>
+        public static void BuildWindowMenuItems()
+        {
+            try { App.BuildWindowMenuItems(); } catch (Exception ex) { App.ReportError("Window menu", ex); }
+        }
+
         /// <summary>Called from <c>MenuBar.BuildMenuBar</c> before the DSAS menus.</summary>
         public static void BuildMenus(ref bool anyItemFocused, ref bool isAnyMenuExpanded)
         {

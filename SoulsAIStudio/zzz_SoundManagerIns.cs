@@ -427,7 +427,7 @@ namespace DSAnimStudio
 
         public float FmodBaseSoundVolume = 0.5f;
 
-        public float AdjustSoundVolume = 100;
+        public float AdjustSoundVolume = SoulsAiStudio.App.SasHooks.SavedSoundVolume; // [SAS] was 100 (not persisted)
 
         public string GetDebugDiagnosticString()
         {
