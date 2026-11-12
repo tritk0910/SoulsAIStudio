@@ -222,8 +222,21 @@ public class SpEffectInterruptsTests
             """;
         var h = SpEffectInterrupts.Build(src).Handlers[5060040];
         Assert.True(h.ClearsQueue);
+        Assert.Null(h.Chance);
         var branch = Assert.Single(ComboSequence.Branches(h.Body));
         Assert.Equal([25d, 25d, 25d, 25d], branch.Arms.Select(a => a.Probability!.Value));
         Assert.Equal([3044], ComboSequence.Flatten(h.Body, _ => 3).Select(s => s.AnimId));
+    }
+}
+
+public class SpEffectInterruptChanceTests
+{
+    [RequiresTestDataFact]
+    public void Owl_ConditionalArms_HaveRandomChance()
+    {
+        var table = SpEffectInterrupts.Build(File.ReadAllText(Samples.OwlBattle));
+        Assert.Equal(75, table.Handlers[5060081].Chance);
+        Assert.Equal(40, table.Handlers[5060029].Chance);
+        Assert.Null(table.Handlers[5060030].Chance);
     }
 }

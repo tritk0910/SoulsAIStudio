@@ -115,6 +115,30 @@ namespace SoulsAiStudio.App
             catch (Exception) { return Array.Empty<(int, float)>(); }
         }
 
+        /// <summary>Start frame of the anim's "End If AI ComboAttack Queued" window (where a queued next anim takes over), or null.</summary>
+        public float? GetComboQueuedFrame(int animId)
+        {
+            try
+            {
+                var doc = zzz_DocumentManager.CurrentDocument;
+                var proj = doc?.EditorScreen?.Proj;
+                if (doc == null || proj == null || !doc.EditorScreen.IsFileOpen) return null;
+                var taeAnim = proj.SAFE_GetFirstAnimationFromFullID(SplitAnimID.FromFullID(doc.GameRoot, animId));
+                if (taeAnim == null) return null;
+                float snap = TaeExtensionMethods.GetCurrentSnapInterval();
+                float? best = null;
+                foreach (var act in taeAnim.SAFE_GetActions())
+                {
+                    if (act.Type != JumpTableEventType || act.ParameterBytes == null || act.ParameterBytes.Length < 4) continue;
+                    if (BitConverter.ToInt32(act.ParameterBytes, 0) != ComboAttackQueuedFlag) continue;
+                    float f = act.StartTime / snap;
+                    if (best == null || f < best) best = f;
+                }
+                return best;
+            }
+            catch (Exception) { return null; }
+        }
+
         /// <summary>
         /// Plays anims back to back. <c>CutFrame</c> forces where an anim ends (e.g. a SpEffect interrupt);
         /// otherwise it ends at "End If AI ComboAttack Queued" (or its end for the last anim).

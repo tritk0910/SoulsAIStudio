@@ -124,6 +124,37 @@ namespace SoulsAiStudio.App
                 for (int k = 0; k < weights.Length; k++) { acc += weights[k]; if (roll < acc) { pick = k; break; } }
                 _choice[b.Line] = pick;
             }
+            _interrupt.Clear();
+            RollInterrupts(_nodes, 0);
+            _plan = null;
+        }
+
+        /// <summary>
+        /// Random path, SpEffect part: walks the (already rolled) path; on each anim the TAE SpEffects are tried in time
+        /// order and each fires with its Goal.Interrupt arm's random chance (<c>and rand &lt;= N</c>, else always). The
+        /// first that fires cuts the anim and its handler chain is rolled the same way. SpEffects at/after the anim's
+        /// "ComboAttack Queued" frame are skipped when another anim is queued after it (the anim is cut before them).
+        /// </summary>
+        private void RollInterrupts(IReadOnlyList<ComboNode> nodes, int level)
+        {
+            if (level >= MaxInterruptDepth) return;
+            var steps = ComboSequence.Flatten(nodes, ChosenArm);
+            for (int i = 0; i < steps.Count; i++)
+            {
+                var s = steps[i];
+                var c = Candidates(s.AnimId);
+                float? queued = i < steps.Count - 1 ? _app.Bridge.GetComboQueuedFrame(s.AnimId) : null;
+                int pick = -1;
+                for (int k = 0; k < c.Count && pick < 0; k++)
+                {
+                    if (queued is float q && c[k].Frame >= q) continue;
+                    if (_rng.NextDouble() * 100 < c[k].Handler.ChancePercent) pick = k;
+                }
+                _interrupt[(s.Line, level)] = pick;
+                if (pick < 0) continue;
+                RollInterrupts(c[pick].Handler.Body, level + 1);
+                if (c[pick].Handler.ClearsQueue) return;
+            }
         }
 
         /// <summary>A step on the played path; Cut = frame where a chosen SpEffect interrupt cuts it.</summary>
@@ -212,7 +243,7 @@ namespace SoulsAiStudio.App
                 {
                     var h = c[i].Handler;
                     string text = $"SpEffect {c[i].SpEffectId} @ frame {c[i].Frame:0} -> Goal.Interrupt line {h.Line + 1}"
-                        + (h.ClearsQueue ? " (ClearSubGoal)" : "") + (h.HasExtraCondition ? " [conditional]" : "");
+                        + (h.ClearsQueue ? " (ClearSubGoal)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.HasExtraCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _plan = null; }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.HasExtraCondition ? "\n(the arm has extra conditions; it only fires when they hold)" : ""));
                 }
