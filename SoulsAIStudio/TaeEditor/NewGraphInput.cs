@@ -533,6 +533,7 @@ namespace DSAnimStudio.TaeEditor
                     var time = CurrentMouseSustainPoint.X;
                     if (time < 0)
                         time = 0;
+                    time = SoulsAiStudio.App.SasHooks.FollowScrubTime(Graph, input, time, IsFirstUpdateCycleOfDrag); // [SAS] follow playhead while scrubbing
                     // Graph.PlaybackCursor.CurrentTime = time;
                     // Graph.PlaybackCursor.StartTime = time;
                     // Graph.PlaybackCursor.Scrubbing = true;
@@ -564,7 +565,7 @@ namespace DSAnimStudio.TaeEditor
                     }
 
 
-                    if (!Main.Input.ShiftHeld)
+                    if (!Main.Input.ShiftHeld && !SoulsAiStudio.App.SasHooks.FollowScrubCenter(Graph, input)) // [SAS] follow playhead replaces edge scroll
                     {
                         float mouseOnscreenRatioX =
                             (float)(input.MousePosition.X - (Graph.Rect.X + Graph.ActionTrackNamePaneEffectiveWidth)) /

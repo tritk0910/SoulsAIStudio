@@ -197,7 +197,8 @@ namespace DSAnimStudio.ImguiOSD
                 }
                 
                 
-                if (ImGui.TreeNode("StateInfo Toggle"))
+                if (SoulsAiStudio.App.SasHooks.DrawStateInfoPanel(this, MainTaeScreen, ref anyFieldFocused)) { } // [SAS] redesigned section (SoulsAiStudio/StateInfoPanel.cs); DSAS original kept below for merges
+                else if (ImGui.TreeNode("StateInfo Toggle"))
                 {
                     int i = 0;
                     lock (_lock)

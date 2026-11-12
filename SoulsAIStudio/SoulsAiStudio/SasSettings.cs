@@ -23,6 +23,9 @@ namespace SoulsAiStudio.App
         /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
         public float SoundVolume { get; set; } = 100;
 
+        /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
+        public bool FollowPlayheadWhileScrubbing { get; set; } = true;
+
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the
         /// real profile; note <see cref="Environment.GetFolderPath"/> ignores the APPDATA variable).

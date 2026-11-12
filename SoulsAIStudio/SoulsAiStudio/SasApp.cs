@@ -23,6 +23,7 @@ namespace SoulsAiStudio.App
         public SasLayout Layout { get; } = new();
         public DsasBridge Bridge { get; } = new();
         private bool _autoLoadCharacter;
+        private bool _spaceWasDown;
         public SasProject? Project => Session?.Project;
 
         private readonly StartScreen _start;
@@ -130,6 +131,7 @@ namespace SoulsAiStudio.App
                 else ReportError("Could not open project", t.Exception?.GetBaseException());
             }
 
+            HandleComboSpace();
             bool focused = false;
             focused |= _start.Build();
             focused |= _wizard.Build();
@@ -177,8 +179,23 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
+            SasHooks.ScrubFollow.MenuItem();
             if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = _combo.IsOpen = true; Layout.RequestApply(); }
             ImGui.EndMenu();
+        }
+
+        /// <summary>
+        /// Space pauses/resumes a combo started from the Combo panel (DSAS's own Space only toggles normal playback,
+        /// which the combo overrides every frame). Ignored while typing in a text field / the Lua editor.
+        /// </summary>
+        private void HandleComboSpace()
+        {
+            bool down = Microsoft.Xna.Framework.Input.Keyboard.GetState().IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Space);
+            bool pressed = down && !_spaceWasDown;
+            _spaceWasDown = down;
+            // Only typing contexts block it: the Lua editor, or any active ImGui text field (not merely a focused panel).
+            if (!pressed || _editor.HadKeyboardFocus || ImGui.IsAnyItemActive() || !DSAnimStudio.Main.Active) return;
+            if (Bridge.ToggleComboPause()) Notify(Bridge.ComboPaused ? "Combo paused (Space to resume)" : "Combo resumed");
         }
 
         // ---------- DSAS integration: Window menu, sound volume ----------

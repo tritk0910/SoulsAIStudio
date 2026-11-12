@@ -57,6 +57,17 @@ namespace SoulsAiStudio.App
             try { App.BuildWindowMenuItems(); } catch (Exception ex) { App.ReportError("Window menu", ex); }
         }
 
+        /// <summary>
+        /// Called right before DSAS serializes a TAE. Keeps the output readable by older tools (DSAS 4.9.9):
+        /// event bank (ActionSetVersion) -1 → the game's bank (Sekiro chr = 14); null headers written as full headers.
+        /// </summary>
+        public static void MakeTaeCompatible(SoulsAssetPipeline.Animation.TAE tae, SoulsAssetPipeline.SoulsGames? game)
+        {
+            if (tae.ActionSetVersion < 0 && game == SoulsAssetPipeline.SoulsGames.SDT) tae.ActionSetVersion = 14;
+            foreach (var anim in tae.Animations)
+                if (anim.Header != null && anim.Header.IsNullHeader) anim.Header.IsNullHeader = false;
+        }
+
         /// <summary>Called from <c>MenuBar.BuildMenuBar</c> before the DSAS menus.</summary>
         public static void BuildMenus(ref bool anyItemFocused, ref bool isAnyMenuExpanded)
         {
@@ -102,6 +113,40 @@ namespace SoulsAiStudio.App
         /// Replaces DSAS's in-place <c>File.WriteAllBytes</c> when saving an anibnd: refuses writes into the game
         /// folder (outside <c>mods\</c>), backs up the old file, and writes atomically.
         /// </summary>
+        // ---- TAE graph: follow playhead while scrubbing (see ScrubFollow) ----
+        private static readonly Lazy<ScrubFollow> _scrubFollow = new(() => new ScrubFollow(App.Settings));
+        public static ScrubFollow ScrubFollow => _scrubFollow.Value;
+
+        /// <summary>Called from <c>NewGraphInput</c>'s absolute scrub branch: the time to set this frame.</summary>
+        public static float FollowScrubTime(DSAnimStudio.TaeEditor.NewGraph graph, DSAnimStudio.FancyInputHandler input, float absoluteTime, bool firstFrame)
+        {
+            try { return ScrubFollow.AdjustTime(graph, input, absoluteTime, firstFrame); }
+            catch (Exception) { return absoluteTime; }
+        }
+
+        /// <summary>Called instead of DSAS's edge-zone scrub scroll; true = we scrolled (centered the playhead).</summary>
+        public static bool FollowScrubCenter(DSAnimStudio.TaeEditor.NewGraph graph, DSAnimStudio.FancyInputHandler input)
+        {
+            try { return ScrubFollow.CenterOnPlayhead(graph, input); }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>Called from DSAS's "Action Graph" menu.</summary>
+        public static void BuildGraphMenuItems()
+        {
+            try { ScrubFollow.MenuItem(); } catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
+        // ---- Entity window: redesigned StateInfo Toggle section ----
+        private static readonly Lazy<StateInfoPanel> _stateInfoPanel = new(() => new StateInfoPanel());
+
+        /// <summary>Called from <c>Window.Entity</c>; draws our StateInfo section and returns true (DSAS's is skipped).</summary>
+        public static bool DrawStateInfoPanel(DSAnimStudio.ImguiOSD.Window.Entity entity, DSAnimStudio.TaeEditor.TaeEditorScreen? tae, ref bool anyFieldFocused)
+        {
+            try { return _stateInfoPanel.Value.Draw(entity, tae, ref anyFieldFocused); }
+            catch (Exception ex) { App.ReportError("StateInfo panel", ex); return false; } // fall back to DSAS's section
+        }
+
         public static void WriteBinder(string path, byte[] bytes)
         {
             string? why = App.WhyWriteIsBlocked(path);

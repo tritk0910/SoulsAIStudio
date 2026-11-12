@@ -87,6 +87,9 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             if (ImGui.Button("Random path")) { RollRandom(); Play(ComboSequence.Flatten(_nodes, ChosenArm)); }
             ImGui.SameLine();
+            if (ImGui.Button(_app.Bridge.ComboPaused ? "▶ Resume" : "|| Pause")) _app.Bridge.ToggleComboPause();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Space also pauses/resumes the combo");
+            ImGui.SameLine();
             if (ImGui.Button("■ Stop")) { _app.Bridge.StopCombo(); }
             ImGui.SameLine();
             ImGui.TextDisabled(path.Count == 0 ? "no anims in this path" : string.Join(" → ", path.Select(s => s.AnimId)));

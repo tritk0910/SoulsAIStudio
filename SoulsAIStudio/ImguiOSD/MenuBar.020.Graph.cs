@@ -39,6 +39,7 @@ namespace DSAnimStudio.ImguiOSD
                 Tae.Config.AnimListShowHkxNames = Checkbox("Show Animation File Names", Tae.Config.AnimListShowHkxNames);
                 ImGui.Separator();
                 Tae.Config.AutoScrollDuringAnimPlayback = Checkbox("Auto-scroll During Anim Playback", Tae.Config.AutoScrollDuringAnimPlayback);
+                SoulsAiStudio.App.SasHooks.BuildGraphMenuItems(); // [SAS] Follow Playhead While Scrubbing
                 ImGui.Separator();
                 Tae.Config.SoloHighlightActionOnHover = Checkbox("Solo Highlight Action on Hover", Tae.Config.SoloHighlightActionOnHover);
                 Tae.Config.SoloHighlightActionOnHover_IgnoresStateInfo = Checkbox("Solo Highlight Action on Hover Ignores StateInfo", Tae.Config.SoloHighlightActionOnHover_IgnoresStateInfo);

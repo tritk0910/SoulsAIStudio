@@ -18,6 +18,7 @@ namespace DSAnimStudio
 
         public PlaybackStates PlaybackState = PlaybackStates.Init;
         public float PlaybackSpeed = 1;
+        public bool Paused = false; // [SAS] Space pauses/resumes a playing combo (Souls AI combo player)
         
 
         public void Init(NewAnimationContainer animContainer, TaeEditorScreen mainScreen)
@@ -119,6 +120,7 @@ namespace DSAnimStudio
         
         public void Update(float elapsedTime)
         {
+            if (Paused) { if (MainScreen?.PlaybackCursor != null) MainScreen.PlaybackCursor.IsPlaying = false; return; } // [SAS] hold the frame; don't let normal playback take over
             elapsedTime *= PlaybackSpeed;
 
             if (Main.Config.LockFramerateToOriginalAnimFramerate)

@@ -134,6 +134,28 @@ namespace SoulsAiStudio.App
             return plans;
         }
 
+        /// <summary>Pauses/resumes the combo that is playing. Returns false when no combo is active.</summary>
+        public bool ToggleComboPause()
+        {
+            try
+            {
+                var c = zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.Combo;
+                if (c == null || c.PlaybackState != NewCombo.PlaybackStates.Playing) return false;
+                c.Paused = !c.Paused;
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        public bool ComboPaused
+        {
+            get
+            {
+                try { return zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.Combo?.Paused == true; }
+                catch (Exception) { return false; }
+            }
+        }
+
         public void StopCombo() => Safe(() => { zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.CancelCombo(); return ""; });
 
         /// <summary>Index of the combo entry playing now, or -1.</summary>

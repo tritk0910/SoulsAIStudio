@@ -638,6 +638,7 @@ namespace DSAnimStudio
                 binderFile.CompressionInfo = RootTaeProperties.BindDcxCompressionInfo;
                 binderFile.ID = RootTaeProperties.TaeRootBindID + bindIndex;
                 binderFile.Name = $"{RootTaeProperties.BindDirectory}\\{shortTaeName}.tae";
+                SoulsAiStudio.App.SasHooks.MakeTaeCompatible(tae, ParentDocument?.GameRoot?.GameType); // [SAS] readable by DSAS 4.9.9
                 binderFile.Bytes = tae.Write();
                 result.Add(binderFile);
             }
@@ -1376,10 +1377,8 @@ namespace DSAnimStudio
                         RootTaeProperties.SkeletonName = tae.SkeletonName;
                         RootTaeProperties.SibName = tae.SibName;
 
-                        if (isPlayerAnibnd)
-                            RootTaeProperties.ActionSetVersion_ForSingleTaeOutput = (int)tae.ActionSetVersion;
-                        else
-                            RootTaeProperties.ActionSetVersion_ForSingleTaeOutput = -1;
+                        // [SAS] keep the original event bank for enemies too (was -1 for non-player chrs: DSAS 4.9.9 can't read that)
+                        RootTaeProperties.ActionSetVersion_ForSingleTaeOutput = (int)tae.ActionSetVersion;
 
                         RootTaeProperties.SaveWithActionTracksStripped = ParentDocument.GameRoot.GameTypeUsesLegacyEmptyEventGroups;
                         RootTaeProperties.DefaultTaeProjectID = tae.ID;

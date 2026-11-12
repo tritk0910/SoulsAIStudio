@@ -63,6 +63,9 @@ namespace SoulsAiStudio.App
         private string _navFilter = "";
         public bool IsOpen = true;
 
+        /// <summary>True when the editor had keyboard focus last frame (Space etc. go to the text, not to playback).</summary>
+        public bool HadKeyboardFocus { get; private set; }
+
         /// <summary>Dock node of this window when its tab was visible this frame, else 0.</summary>
         public uint VisibleInDockId { get; private set; }
 
@@ -133,6 +136,7 @@ namespace SoulsAiStudio.App
             }
             finally { ImGui.End(); } // keep ImGui's stack balanced even if a panel throws
             ImeGuard.SetEditorFocused(DSAnimStudio.Main.WinForm?.Handle ?? IntPtr.Zero, focused, _app.Settings.AllowImeInEditor);
+            HadKeyboardFocus = focused;
             return focused;
         }
 
