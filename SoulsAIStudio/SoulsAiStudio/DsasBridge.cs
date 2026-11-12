@@ -166,7 +166,9 @@ namespace SoulsAiStudio.App
                     continue;
                 }
 
-                float total = Math.Max(1, hkx.FrameCount - 1);
+                // In TAE frames (snap = 1/30 s for Sekiro). Not hkx.FrameCount: some HKX are 60 fps (e.g. Owl 3048 = 213 frames,
+                // 3.53 s), which made the combo hold/loop the last anim for twice its length.
+                float total = Math.Max(1, (float)Math.Round(hkx.Duration / snap));
                 float end = total;
                 string reason = "anim end";
                 if (k < animIds.Count - 1)
@@ -202,6 +204,13 @@ namespace SoulsAiStudio.App
             }
             catch (Exception) { return false; }
         }
+
+        public void SetRootMotionBlending(bool on) => Safe(() =>
+        {
+            var c = zzz_DocumentManager.CurrentDocument?.EditorScreen?.Graph?.ViewportInteractor?.CurrentModel?.AnimContainer;
+            if (c != null) c.EnableRootMotionBlending = on;
+            return "";
+        });
 
         /// <summary>Play/pause of normal (non-combo) playback, same as DSAS's transport button.</summary>
         public void TogglePlayback() => Safe(() => { zzz_DocumentManager.CurrentDocument?.EditorScreen?.PlaybackCursor?.Transport_PlayPause(); return ""; });

@@ -337,7 +337,7 @@ namespace DSAnimStudio
 
         public bool ForceDisableAnimLayerSystem = false;
 
-        public bool EnableRootMotionBlending = false;
+        public bool EnableRootMotionBlending = SoulsAiStudio.App.SasHooks.RootMotionBlending; // [SAS] DSAS 4.9.9 blended root motion by anim weight (5.0: foreground only)
 
         public class AnimHkxInfo
         {

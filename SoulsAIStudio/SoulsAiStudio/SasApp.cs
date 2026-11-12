@@ -180,6 +180,15 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
             SasHooks.ScrubFollow.MenuItem();
+            if (ImGui.MenuItem("Blend Root Motion (DSAS 4.9.9)", "", Settings.BlendRootMotion))
+            {
+                Settings.BlendRootMotion = !Settings.BlendRootMotion;
+                Settings.Save();
+                Bridge.SetRootMotionBlending(Settings.BlendRootMotion);
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("On: during a TAE Blend the character's movement mixes the previous and the new anim by blend weight.\n" +
+                                 "Off (DSAS 5.0): movement follows only the new anim, so it can stop or jump when a blend starts.");
             if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = _combo.IsOpen = true; Layout.RequestApply(); }
             ImGui.EndMenu();
         }

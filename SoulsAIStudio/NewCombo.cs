@@ -98,6 +98,7 @@ namespace DSAnimStudio
                 var hkxID = taeAnim.GetHkxID(MainScreen.Proj);
                 MainScreen.SelectNewAnimRef(taeCategory, taeAnim, disableHkxSelect: true);
                 AnimContainer.RequestAnim(NewAnimSlot.SlotTypes.Base, hkxID, true, next.Weight, finalTime, blendDuration);
+                SoulsAiStudio.App.SasHooks.OnComboAnimRequested(AnimContainer, next.IsLoop); // [SAS] no stale sync time (new anim started mid-way), honor entry IsLoop
                 AnimContainer.AccessAnimSlots(slots =>
                 {
                     CurrentEntryAnim = slots[NewAnimSlot.SlotTypes.Base].GetForegroundAnimation();

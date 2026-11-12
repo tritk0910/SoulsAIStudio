@@ -22,6 +22,8 @@ namespace SoulsAiStudio.App
 
         /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
         public float SoundVolume { get; set; } = 100;
+        /// <summary>Blend root motion between anims during a TAE Blend (DSAS 4.9.9 behavior). See SasHooks.RootMotionBlending.</summary>
+        public bool BlendRootMotion { get; set; } = true;
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies

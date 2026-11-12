@@ -42,6 +42,30 @@ namespace SoulsAiStudio.App
             try { App.Bridge.BeforeOpenRecent(doc, container); } catch (Exception ex) { App.ReportError("Load hook", ex); }
         }
 
+        /// <summary>
+        /// Root motion during a blend: weighted between the outgoing and incoming anim like DSAS 4.9.9 (5.0 used only the
+        /// incoming anim → the character stops/jumps when a blend starts). Read when a model's anim container is created.
+        /// </summary>
+        public static bool RootMotionBlending
+        {
+            get { try { return App.Settings.BlendRootMotion; } catch (Exception) { return true; } }
+        }
+
+        /// <summary>
+        /// A combo step just requested its anim (NewCombo.GoToNextComboEntry).
+        /// 1) The container may still hold a "sync time" from the previous anim (set when it hit its end/looped, e.g. the last
+        ///    anim of the previous combo); DSAS's playback cursor pops it next frame and absolute-scrubs the NEW anim to that
+        ///    time, so a replayed combo started mid-anim (e.g. 3002 at 1.2 s). Discard it.
+        /// 2) Every container scrub copies the container's loop flag (DSAS "Loop" setting) into the slot request, so combo
+        ///    entries looped even with IsLoop = false: an anim cut at its end wrapped to frame 0 and kept playing from the
+        ///    start while it blended out. Use the entry's flag; DSAS restores the setting when the combo is over.
+        /// </summary>
+        public static void OnComboAnimRequested(DSAnimStudio.NewAnimationContainer container, bool isLoop)
+        {
+            if (container == null) return;
+            try { container.PopSyncTime(); container.EnableLooping = isLoop; } catch (Exception) { }
+        }
+
         /// <summary>Initial sound volume for each new DSAS document (DSAS kept it per document and reset it to 100).</summary>
         public static float SavedSoundVolume => App.Settings.SoundVolume;
 

@@ -332,12 +332,18 @@ namespace DSAnimStudio
             }
             // [SAS] Live Blend window (start/end of the TAE Blend event, type 16), read every frame by NewAnimSlot so the
             // preview blends over exactly the block's span like DSAS 4.9.9. Returns end < 0 when there's no Blend event.
-            public (float Start, float End) SAFE_GetBlendWindow() => SAFE(() =>
+            // Called per anim slot every frame → no closure allocation, indexed loop (no enumerator).
+            public (float Start, float End) SAFE_GetBlendWindow()
             {
-                foreach (var a in Actions)
-                    if (a.Type == 16) return (a.StartTime, a.EndTime);
+                if (ParentProj == null) return INNER_GetBlendWindow();
+                lock (ParentProj._lock_DSAProj) return INNER_GetBlendWindow();
+            }
+            private (float Start, float End) INNER_GetBlendWindow()
+            {
+                for (int i = 0; i < Actions.Count; i++)
+                    if (Actions[i].Type == 16) return (Actions[i].StartTime, Actions[i].EndTime);
                 return (0f, -1f);
-            });
+            }
 
             public float SAFE_GetBlendDuration()
             {
