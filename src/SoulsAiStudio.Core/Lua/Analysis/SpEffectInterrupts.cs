@@ -3,8 +3,14 @@ using SoulsAiStudio.Core.Lua.Syntax;
 namespace SoulsAiStudio.Core.Lua.Analysis;
 
 /// <summary>One <c>if interruptSpeffect == S then …</c> arm of the AI's interrupt handler.</summary>
+/// <param name="Line">0-based line of the arm (<c>elseif interruptSpeffect == S then</c>).</param>
 /// <param name="ClearsQueue">The arm starts with <c>ClearSubGoal()</c>: its steps replace the rest of the current combo.</param>
-public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body);
+/// <param name="Condition">The arm's full condition (may add e.g. <c>and interruptRand &lt;= 75</c> or a timer check).</param>
+public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "")
+{
+    /// <summary>The arm tests more than <c>v == S</c> (extra random/timer/state conditions).</summary>
+    public bool HasExtraCondition => Condition.Contains(" and ", StringComparison.Ordinal);
+}
 
 /// <summary>
 /// Reads the SpEffect interrupt table of a battle script (CLAUDE.md P2): in <c>Goal.Interrupt</c>, the variable assigned
@@ -40,11 +46,17 @@ public static class SpEffectInterrupts
         {
             var nodes = ComboSequence.Build(src, all, goal);
             foreach (var branch in ComboSequence.Branches(nodes))
-                foreach (var arm in branch.Arms)
+                for (int a = 0; a < branch.Arms.Count; a++)
+                {
+                    var arm = branch.Arms[a];
+                    int line = arm.Line >= 0 ? arm.Line : branch.Line;
+                    // The arm's source lines end where the next arm starts (or a few lines on for the last one).
+                    int endLine = a + 1 < branch.Arms.Count && branch.Arms[a + 1].Line > line ? branch.Arms[a + 1].Line - 1 : line + 3;
                     foreach (int id in SpEffectIds(arm.Condition, spVars))
-                        handlers.TryAdd(id, new SpEffectHandler(id, branch.Line,
+                        handlers.TryAdd(id, new SpEffectHandler(id, line,
                             arm.Body.FirstOrDefault() is ComboClear,
-                            Replans(src, t, branch.Line, arm), arm.Body));
+                            Replans(src, t, line, endLine, arm), arm.Body, arm.Condition));
+                }
         }
         return new Table(handlers, observed);
     }
@@ -58,8 +70,14 @@ public static class SpEffectInterrupts
                 yield return id;
     }
 
-    /// <summary>Arm without combo steps that calls <c>Replanning()</c> (re-runs Activate instead of a combo).</summary>
-    private static bool Replans(string src, List<LuaToken> t, int line, ComboArm arm) =>
-        !arm.Body.OfType<ComboStep>().Any() && arm.Condition.Length > 0
-        && t.Any(x => x.Line >= line && x.Line <= line + 3 && x.Is(src, "Replanning"));
+    /// <summary>
+    /// Arm without combo steps (in any nested branch) that calls <c>Replanning()</c> within its own lines
+    /// (re-runs Activate instead of a combo).
+    /// </summary>
+    private static bool Replans(string src, List<LuaToken> t, int line, int endLine, ComboArm arm) =>
+        !HasSteps(arm.Body) && arm.Condition.Length > 0
+        && t.Any(x => x.Line >= line && x.Line <= endLine && x.Is(src, "Replanning"));
+
+    private static bool HasSteps(IReadOnlyList<ComboNode> nodes) =>
+        nodes.Any(n => n is ComboStep || n is ComboBranch b && b.Arms.Any(a => HasSteps(a.Body)));
 }

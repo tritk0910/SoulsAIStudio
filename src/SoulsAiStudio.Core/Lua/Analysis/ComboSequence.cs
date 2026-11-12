@@ -14,7 +14,8 @@ public sealed record ComboClear(int Line) : ComboNode(Line);
 /// <summary>One arm of an if/elseif/else chain.</summary>
 /// <param name="Condition">Source text of the condition ("else" for the else arm).</param>
 /// <param name="Probability">0–100 when the arm is decided by a random roll (<c>r &lt;= N</c>), else null.</param>
-public sealed record ComboArm(string Condition, double? Probability, IReadOnlyList<ComboNode> Body);
+/// <param name="Line">0-based line of the arm's <c>if</c> / <c>elseif</c> / <c>else</c> keyword (-1 for the implicit empty arm).</param>
+public sealed record ComboArm(string Condition, double? Probability, IReadOnlyList<ComboNode> Body, int Line = -1);
 
 /// <summary>An if/elseif/else chain. Without an else arm, an implicit empty arm is added ("none of the above").</summary>
 public sealed record ComboBranch(int Line, IReadOnlyList<ComboArm> Arms) : ComboNode(Line);
@@ -158,8 +159,9 @@ public static class ComboSequence
         private ComboBranch If(ref int i)
         {
             int line = t[i].Line;
-            var arms = new List<(string Cond, List<ComboNode> Body)>();
+            var arms = new List<(string Cond, List<ComboNode> Body, int Line)>();
             bool hasElse = false;
+            int armLine = line;
             i++; // 'if'
             while (true)
             {
@@ -168,27 +170,28 @@ public static class ComboSequence
                 string cond = TextOf(condStart, i);
                 i++; // 'then'
                 var body = Block(ref i, ["elseif", "else", "end"]);
-                arms.Add((cond, body));
-                if (IsKw(i, "elseif")) { i++; continue; }
+                arms.Add((cond, body, armLine));
+                if (IsKw(i, "elseif")) { armLine = t[i].Line; i++; continue; }
                 if (IsKw(i, "else"))
                 {
+                    int elseLine = t[i].Line;
                     i++;
-                    arms.Add(("else", Block(ref i, ["end"])));
+                    arms.Add(("else", Block(ref i, ["end"]), elseLine));
                     hasElse = true;
                 }
                 i++; // 'end'
                 break;
             }
-            if (!hasElse) arms.Add(("(no branch taken)", []));
+            if (!hasElse) arms.Add(("(no branch taken)", [], -1));
             return new ComboBranch(line, Probabilities(arms));
         }
 
         /// <summary>Thresholds on one random var, in order: r &lt;= a, r &lt;= b, … else → a, b-a, …, 100-last.</summary>
-        private List<ComboArm> Probabilities(List<(string Cond, List<ComboNode> Body)> arms)
+        private List<ComboArm> Probabilities(List<(string Cond, List<ComboNode> Body, int Line)> arms)
         {
             var thresholds = new List<double?>();
             string? var = null;
-            foreach (var (cond, _) in arms)
+            foreach (var (cond, _, _) in arms)
             {
                 var parts = cond.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 3 && randomVars.Contains(parts[0]) && (var == null || var == parts[0])
@@ -213,7 +216,7 @@ public static class ComboSequence
                     p = Math.Clamp(upTo - prev, 0, 100);
                     prev = Math.Max(prev, upTo);
                 }
-                result.Add(new ComboArm(arms[a].Cond, p, arms[a].Body));
+                result.Add(new ComboArm(arms[a].Cond, p, arms[a].Body, arms[a].Line));
             }
             return result;
         }

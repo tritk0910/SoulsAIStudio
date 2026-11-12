@@ -151,6 +151,51 @@ public class SpEffectInterruptsTests
         Assert.Equal("TARGET_SELF", table.Observed[5030]);
     }
 
+    [RequiresTestDataFact]
+    public void Owl_ArmsWithOnlyNestedRandomSteps_AreCombos_NotReplans()
+    {
+        string src = File.ReadAllText(Samples.OwlBattle);
+        var lines = src.Split('\n');
+        var table = SpEffectInterrupts.Build(src);
+        foreach (int id in new[] { 5060030, 5060040, 5060081, 5060029 })
+        {
+            var h = table.Handlers[id];
+            Assert.False(h.Replans, $"{id} wrongly marked Replanning");
+            Assert.Contains($"== {id}", lines[h.Line]); // line of its own arm, not of the if-chain
+            Assert.NotEmpty(ComboSequence.Flatten(h.Body, _ => 0));
+        }
+        Assert.Equal([3060, 3061, 3016], ComboSequence.Flatten(table.Handlers[5060030].Body, _ => 0).Select(s => s.AnimId));
+        Assert.True(table.Handlers[5060081].HasExtraCondition);
+        Assert.False(table.Handlers[5060030].HasExtraCondition);
+    }
+
+    [Fact]
+    public void ArmAfterReplanningArm_WithStepsOnlyInNestedBranch_IsNotReplans()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local r = arg1:GetRandam_Int(1, 100)
+                local sp = arg1:GetSpecialEffectActivateInterruptType(0)
+                if sp == 1 then
+                    arg1:Replanning()
+                    return true
+                elseif sp == 2 then
+                    arg2:ClearSubGoal()
+                    if r <= 50 then arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3001, TARGET_ENE_0, 999, 0, 0)
+                    else arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3002, TARGET_ENE_0, 999, 0, 0)
+                    end
+                    return true
+                end
+                return false
+            end
+            """;
+        var table = SpEffectInterrupts.Build(src);
+        Assert.True(table.Handlers[1].Replans);
+        Assert.Equal(3, table.Handlers[1].Line);
+        Assert.False(table.Handlers[2].Replans);
+        Assert.Equal(6, table.Handlers[2].Line);
+    }
+
     [Fact]
     public void UserExample_5060040_FourWayRandom()
     {

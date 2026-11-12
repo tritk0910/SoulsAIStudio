@@ -156,17 +156,26 @@ namespace SoulsAiStudio.App
         private IReadOnlyList<(int SpEffectId, float Frame, SpEffectHandler Handler)> Candidates(int animId)
         {
             if (_handlers == null) return Array.Empty<(int, float, SpEffectHandler)>();
-            if (!_spEvents.TryGetValue(animId, out var events)) _spEvents[animId] = events = _app.Bridge.GetSpEffectEvents(animId);
+            var events = SpEvents(animId);
             var result = new List<(int, float, SpEffectHandler)>();
             foreach (var e in events)
                 if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans) result.Add((e.SpEffectId, e.Frame, h));
             return result;
         }
 
+        /// <summary>TAE SpEffect events of an anim. Empty results are not cached: the anibnd may still be loading.</summary>
+        private IReadOnlyList<(int SpEffectId, float Frame)> SpEvents(int animId)
+        {
+            if (_spEvents.TryGetValue(animId, out var events)) return events;
+            events = _app.Bridge.GetSpEffectEvents(animId);
+            if (events.Count > 0) _spEvents[animId] = events;
+            return events;
+        }
+
         /// <summary>Tooltip text: every SpEffect event in the anim's TAE and whether Goal.Interrupt handles it.</summary>
         private string SpEffectSummary(int animId)
         {
-            if (!_spEvents.TryGetValue(animId, out var events)) _spEvents[animId] = events = _app.Bridge.GetSpEffectEvents(animId);
+            var events = SpEvents(animId);
             if (events.Count == 0) return "TAE SpEffect events: none (or character not loaded)";
             var lines = events.Select(e =>
             {
@@ -202,8 +211,10 @@ namespace SoulsAiStudio.App
                 for (int i = 0; i < c.Count; i++)
                 {
                     var h = c[i].Handler;
-                    string text = $"SpEffect {c[i].SpEffectId} @ frame {c[i].Frame:0} -> Goal.Interrupt line {h.Line + 1}" + (h.ClearsQueue ? " (ClearSubGoal)" : "");
+                    string text = $"SpEffect {c[i].SpEffectId} @ frame {c[i].Frame:0} -> Goal.Interrupt line {h.Line + 1}"
+                        + (h.ClearsQueue ? " (ClearSubGoal)" : "") + (h.HasExtraCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _plan = null; }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.HasExtraCondition ? "\n(the arm has extra conditions; it only fires when they hold)" : ""));
                 }
             }
             finally { ImGui.EndCombo(); }
