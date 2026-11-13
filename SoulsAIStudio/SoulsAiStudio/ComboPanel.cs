@@ -32,6 +32,9 @@ namespace SoulsAiStudio.App
         private IReadOnlyList<ComboNode> _nodes = Array.Empty<ComboNode>();
         private GoalFunction? _goal;
         private bool _follow = true;
+        /// <summary>Cursor position set by our own jump (click on a step): while the cursor stays there, keep the
+        /// current goal instead of following it into e.g. Goal.Interrupt.</summary>
+        private (int Line, int Column)? _ownJump;
         private List<DsasBridge.ComboPlan>? _plan;
         public bool IsOpen = true;
         private readonly ComboScriptTab _manual;
@@ -94,7 +97,8 @@ namespace SoulsAiStudio.App
         {
             var o = _editor.Active;
             if (o?.Doc == null) { _goal = null; _nodes = Array.Empty<ComboNode>(); return; }
-            var goal = _follow ? o.GoalAtCursor ?? _goal : _goal;
+            if (_ownJump != null && o.Editor.Cursor != _ownJump) _ownJump = null; // the user moved the cursor: follow again
+            var goal = _follow && _ownJump == null ? o.GoalAtCursor ?? _goal : _goal;
             if (goal != null && _goal != null && goal.Name != _goal.Name) goal = o.Outline.FirstOrDefault(g => g.Name == goal.Name) ?? goal;
             string key = $"{o.Script.Key}|{goal?.Name}|{o.OutlineVersion}";
             if (key == _cacheKey) return;
@@ -367,6 +371,7 @@ namespace SoulsAiStudio.App
                                     new Vector2(Candidates(s.AnimId).Count > 0 ? 210 : 0, 0)))
                             {
                                 _editor.JumpTo(s.Line);
+                                if (_editor.Active is { } ed) _ownJump = ed.Editor.Cursor;
                                 _app.PlayAnim(s.AnimId);
                             }
                             if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\n\n" + SpEffectSummary(s.AnimId));
