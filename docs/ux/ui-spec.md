@@ -40,7 +40,7 @@
 Đường dẫn tương đối từ `SoulsAIStudio/`.
 
 ### 1.1 Kiến trúc UI
-- **ImGui.NET 1.87.3** (managed, `../Lib/ImGui.NET.dll`; còn bản cũ `ImGui.NET_old.dll` 1.78), native `cimgui.dll` là **bản docking branch, chuỗi version 1.88**. Target framework DSAS: `net9.0-windows7.0` (`SoulsAIStudio.csproj`).
+- **ImGui.NET 1.87.3** (managed, `../Lib/ImGui.NET.dll`), native `cimgui.dll` là **bản docking branch, chuỗi version 1.88**. Target framework DSAS: `net9.0-windows7.0` (`SoulsAIStudio.csproj`).
 - Native `cimgui.dll` **có export `igDockBuilder*`** nhưng wrapper managed 1.87 **không bọc** → muốn dùng DockBuilder phải tự `[DllImport]`.
 - **Docking bật** (`ImguiOSD/OSD.cs:316`, `ImGuiRenderer.cs:96`): một window full-screen không viền `MainDockSpace` chứa `ImGui.DockSpace` (`OSD.cs:350-378`). Layout mặc định nạp từ ini nhúng `EmbRes/imgui_default_V5.ini` / `imgui_default_Legacy.ini` (`OSD.cs:20-41`), lưu ở `imgui.ini` cạnh exe.
 - `io.ConfigWindowsMoveFromTitleBarOnly = true`, resize từ cạnh (`OSD.cs:318-319`).

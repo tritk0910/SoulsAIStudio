@@ -78,10 +78,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="DSAnimStudio_Icon.ico" />
-  </ItemGroup>
-
-  <ItemGroup>
     <EmbeddedResource Include="EmbRes\Credits.txt">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </EmbeddedResource>

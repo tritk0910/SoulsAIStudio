@@ -237,6 +237,9 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
+# [SAS] these "Backup" folders are source code (BackupService), not VS upgrade backups
+!src/SoulsAiStudio.Core/Backup/
+!tests/SoulsAiStudio.Core.Tests/Backup/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/

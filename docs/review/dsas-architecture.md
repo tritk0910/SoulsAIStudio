@@ -151,7 +151,7 @@ Recommendation for `GameProfile.Sekiro`:
 Take the authoritative names from the Paramdex `SDT` paramdefs. For Bullet, look for `HitSpEffectId` and `spEffectId0..4`, and verify them against the paramdef.
 
 ### (b) ImGui.NET version, text editor widget
-- `Lib/ImGui.NET.dll` is **v1.87.3** (AssemblyVersion 1.87.3.0). `Lib/ImGui.NET_old.dll` is 1.78 and unused. The native `cimgui.dll` is the docking build: it exports `igDockSpace` and `igDockBuilder*`, but the managed side does not bind `DockBuilder*`.
+- `Lib/ImGui.NET.dll` is **v1.87.3** (AssemblyVersion 1.87.3.0). `Lib/ImGui.NET_old.dll` (1.78, unused) was removed. The native `cimgui.dll` is the docking build: it exports `igDockSpace` and `igDockBuilder*`, but the managed side does not bind `DockBuilder*`.
 - **There is no code-editor widget.** `InputTextMultiline` is bound but never used. The only text inputs are single-line fields with `CallbackAlways` (`Dialog.TextInput.cs:52`, `Dialog.TagPicker.cs:138`, `Tools.cs:292`). The Lua editor is a from-scratch widget: either port ImGuiColorTextEdit to C# or write one on `ImDrawList`. It remains the top risk, as CLAUDE.md says.
 - A newer cimgui with the C++ ImGuiColorTextEdit is **not** an option without rebuilding `cimgui.dll`. Avoid that because it changes a native binary that upstream also ships.
 
