@@ -37,8 +37,24 @@ namespace SoulsAiStudio.App
 
                 ImGui.Spacing();
                 ImGui.Text("Recent projects");
+                if (_app.Recent.Paths.Count > 0)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Clear list")) ImGui.OpenPopup("##sas_clear_recent");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Forget all recent projects. The project files are not deleted.\nRight-click a project to remove just that one.");
+                    if (ImGui.BeginPopup("##sas_clear_recent"))
+                    {
+                        ImGui.Text("Clear the recent projects list?");
+                        ImGui.TextDisabled("Project files stay on disk; use Open Project... to open them again.");
+                        if (ImGui.Button("Clear")) { _app.Recent.Clear(); ImGui.CloseCurrentPopup(); }
+                        ImGui.SameLine();
+                        if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+                        ImGui.EndPopup();
+                    }
+                }
                 ImGui.BeginChild("##recent", new Vector2(0, -32), true);
                 if (_app.Recent.Paths.Count == 0) ImGui.TextDisabled("No recent projects yet.");
+                string? removeRecent = null;
                 foreach (string p in _app.Recent.Paths)
                 {
                     bool exists = File.Exists(p);
@@ -46,10 +62,16 @@ namespace SoulsAiStudio.App
                     if (ImGui.Selectable($"{Path.GetFileNameWithoutExtension(p)}##{p}", false, ImGuiSelectableFlags.AllowDoubleClick) && exists)
                         _app.OpenProject(p);
                     if (!exists) ImGui.PopStyleColor();
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(exists ? p : p + "\n(file not found)");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip((exists ? p : p + "\n(file not found)") + "\nRight-click: remove from list");
+                    if (ImGui.BeginPopupContextItem($"##ctx{p}"))
+                    {
+                        if (ImGui.MenuItem("Remove from list")) removeRecent = p;
+                        ImGui.EndPopup();
+                    }
                     ImGui.SameLine(260);
                     ImGui.TextDisabled(Path.GetDirectoryName(p) ?? "");
                 }
+                if (removeRecent != null) _app.Recent.Remove(removeRecent);
                 ImGui.EndChild();
 
                 bool show = _app.Settings.ShowStartScreenOnLaunch;

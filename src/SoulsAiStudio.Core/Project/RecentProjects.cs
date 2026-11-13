@@ -42,6 +42,14 @@ public sealed class RecentProjects
         if (_paths.RemoveAll(p => string.Equals(p, projectPath, StringComparison.OrdinalIgnoreCase)) > 0) Persist();
     }
 
+    /// <summary>Forgets every entry (the project files themselves are not touched).</summary>
+    public void Clear()
+    {
+        if (_paths.Count == 0) return;
+        _paths.Clear();
+        Persist();
+    }
+
     private void Persist()
     {
         try { AtomicFile.WriteAllText(_storePath, JsonSerializer.Serialize(_paths)); }

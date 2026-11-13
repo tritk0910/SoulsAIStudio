@@ -169,6 +169,9 @@ namespace SoulsAiStudio.App
             {
                 foreach (string p in Recent.Paths)
                     if (ImGui.MenuItem(Path.GetFileNameWithoutExtension(p), "", false, File.Exists(p))) OpenProject(p);
+                ImGui.Separator();
+                if (ImGui.MenuItem("Clear Recent Projects")) Recent.Clear();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Forget the list. Project files are not deleted.");
                 ImGui.EndMenu();
             }
             ImGui.Separator();

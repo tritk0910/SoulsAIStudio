@@ -209,4 +209,17 @@ public class CatalogAndProjectFileTests
         r.Add(work.Combine("a.sasproj"));
         Assert.Single(new RecentProjects(store).Paths);
     }
+
+    [Fact]
+    public void RecentProjects_Clear_PersistsEmptyList()
+    {
+        using var work = TempWorkDir.Create("recent-clear");
+        string store = work.Combine("recent.json");
+        var r = new RecentProjects(store);
+        r.Add(work.Combine("a.sasproj"));
+        r.Add(work.Combine("b.sasproj"));
+        r.Clear();
+        Assert.Empty(r.Paths);
+        Assert.Empty(new RecentProjects(store).Paths);
+    }
 }
