@@ -41,6 +41,7 @@ namespace SoulsAiStudio.App
             _editor = new LuaEditorPanel(this);
             _scripts = new ScriptsPanel(this, _editor);
             _combo = new ComboPanel(this, _editor);
+            SasHooks.ApplyLightingPreset(Settings.Lighting499);
 
             // "--sas-project <file.sasproj>" (or a bare .sasproj path, e.g. from a file association) opens it on launch.
             string[] args = Environment.GetCommandLineArgs();
@@ -183,6 +184,16 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
             SasHooks.ScrubFollow.MenuItem();
+            if (ImGui.MenuItem("Lighting Like DSAS 4.9.9", "", Settings.Lighting499))
+            {
+                Settings.Lighting499 = !Settings.Lighting499;
+                Settings.Save();
+                SasHooks.ApplyLightingPreset(Settings.Lighting499);
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("On: light from the side and above, normal ambient, no subsurface wrap: clear light/dark sides (DSAS 4.9.9).\n" +
+                                 "Off: DSAS 5.0 lighting (light from near the camera, double ambient, SSS): brighter but flatter.\n" +
+                                 "Fine-tune with Toolbox > Lighting (Light H / Light V, Global SSS Mult).");
             if (ImGui.MenuItem("Blend Root Motion (DSAS 4.9.9)", "", Settings.BlendRootMotion))
             {
                 Settings.BlendRootMotion = !Settings.BlendRootMotion;

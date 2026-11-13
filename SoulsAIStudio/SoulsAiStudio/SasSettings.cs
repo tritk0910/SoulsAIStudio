@@ -27,6 +27,8 @@ namespace SoulsAiStudio.App
         public bool ComboScriptLoop { get; set; }
         /// <summary>Blend root motion between anims during a TAE Blend (DSAS 4.9.9 behavior). See SasHooks.RootMotionBlending.</summary>
         public bool BlendRootMotion { get; set; } = true;
+        /// <summary>Viewport lighting like DSAS 4.9.9 (side light, ambient x1, no SSS wrap). See SasHooks.ApplyLightingPreset.</summary>
+        public bool Lighting499 { get; set; } = true;
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies

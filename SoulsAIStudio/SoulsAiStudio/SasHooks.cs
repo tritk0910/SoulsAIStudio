@@ -66,6 +66,24 @@ namespace SoulsAiStudio.App
             try { container.PopSyncTime(); container.EnableLooping = isLoop; } catch (Exception) { }
         }
 
+        /// <summary>Multiplier on the viewport ambient light: DSAS 5.0 doubles it, 4.9.9 did not.</summary>
+        public static float AmbientLightBoost
+        {
+            get { try { return App.Settings.Lighting499 ? 1f : 2f; } catch (Exception) { return 2f; } }
+        }
+
+        /// <summary>
+        /// Sets the viewport light for the chosen look. DSAS 4.9.9: light from the side/above (H -0.75, V -0.75) and no
+        /// subsurface "wrap" lighting, so models have clear light and dark sides. DSAS 5.0: light from near the camera
+        /// (H 0.2, V -0.2) and SSS x2, which looks flatter. The Toolbox sliders still adjust both afterwards.
+        /// </summary>
+        public static void ApplyLightingPreset(bool lighting499)
+        {
+            DSAnimStudio.ViewportEnvironment.LightRotationH = lighting499 ? -0.75f : 0.2f;
+            DSAnimStudio.ViewportEnvironment.LightRotationV = lighting499 ? -0.75f : -0.2f;
+            DSAnimStudio.ViewportEnvironment.SSSMult = lighting499 ? 0f : 2f;
+        }
+
         /// <summary>Initial sound volume for each new DSAS document (DSAS kept it per document and reset it to 100).</summary>
         public static float SavedSoundVolume => App.Settings.SoundVolume;
 

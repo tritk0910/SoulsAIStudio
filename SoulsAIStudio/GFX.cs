@@ -738,7 +738,7 @@ namespace DSAnimStudio
             FlverShader.Effect.EnvironmentMap = ViewportEnvironment.CurrentCubemap;
             SkyboxShader.Effect.EnvironmentMap = ViewportEnvironment.CurrentCubemap;
 
-            FlverShader.Effect.AmbientLightMult = ViewportEnvironment.AmbientLightMult * 2;
+            FlverShader.Effect.AmbientLightMult = ViewportEnvironment.AmbientLightMult * SoulsAiStudio.App.SasHooks.AmbientLightBoost; // [SAS] was * 2 (5.0); 4.9.9 look uses * 1
             FlverShader.Effect.DirectLightMult = ViewportEnvironment.FlverDirectLightMult * 1 * (zzz_DocumentManager.CurrentDocument.GameRoot.GameType == SoulsAssetPipeline.SoulsGames.DS1R ? 0.6f : 1);
             FlverShader.Effect.IndirectLightMult = ViewportEnvironment.FlverIndirectLightMult * (zzz_DocumentManager.CurrentDocument.GameRoot.GameType == SoulsAssetPipeline.SoulsGames.DS1R ? 0.6f : 1);
 
