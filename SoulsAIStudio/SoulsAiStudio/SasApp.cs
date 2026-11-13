@@ -18,6 +18,7 @@ namespace SoulsAiStudio.App
     public sealed class SasApp
     {
         public SasSettings Settings { get; } = SasSettings.Load();
+        private readonly ViewportLightingStore _lighting;
         public RecentProjects Recent { get; } = new(Path.Combine(SasSettings.UserDataDir, "recent.json"));
         public ProjectSession? Session { get; private set; }
         public SasLayout Layout { get; } = new();
@@ -42,6 +43,8 @@ namespace SoulsAiStudio.App
             _scripts = new ScriptsPanel(this, _editor);
             _combo = new ComboPanel(this, _editor);
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
+            _lighting = new ViewportLightingStore(Settings);
+            _lighting.Restore(); // the user's own Toolbox values win over the preset
 
             // "--sas-project <file.sasproj>" (or a bare .sasproj path, e.g. from a file association) opens it on launch.
             string[] args = Environment.GetCommandLineArgs();
@@ -133,6 +136,7 @@ namespace SoulsAiStudio.App
             }
 
             HandleComboSpace();
+            _lighting.Tick();
             // Skybox preset once, after DSAS has loaded its config and cubemaps (an editor document exists).
             if (Settings.SkyboxPresetVersion < 1 && DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen != null
                 && SasHooks.ApplySkyboxPreset(Settings.Lighting499))

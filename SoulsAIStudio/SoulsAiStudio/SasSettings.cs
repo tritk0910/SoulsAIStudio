@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using SoulsAiStudio.Core.IO;
@@ -31,6 +32,8 @@ namespace SoulsAiStudio.App
         public bool Lighting499 { get; set; } = true;
         /// <summary>Version of the skybox/cubemap preset already applied once (DSAS keeps the user's later choice in its config).</summary>
         public int SkyboxPresetVersion { get; set; }
+        /// <summary>Toolbox [Lighting] values DSAS does not save itself (see ViewportLightingStore). Null = never changed.</summary>
+        public Dictionary<string, float>? ViewportLighting { get; set; }
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies
