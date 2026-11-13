@@ -112,7 +112,7 @@ namespace DSAnimStudio.ImguiOSD
                 var x = ImGui.GetWindowViewport();
                 x.Flags = ImGuiViewportFlags.TopMost;
                 
-                ImGui.SetWindowFocus();
+                SoulsAiStudio.App.SasHooks.BringTooltipToFront(); // [SAS] was ImGui.SetWindowFocus(): stole focus from the TAE graph
                 
             }
 

@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.IO;
+using System.Numerics;
 using ImGuiNET;
 
 namespace SoulsAiStudio.App
@@ -206,6 +207,56 @@ namespace SoulsAiStudio.App
             try { return ScrubFollow.CenterOnPlayhead(graph, input); }
             catch (Exception) { return false; }
         }
+
+        // ---- TAE graph: mouse focus (see GraphClickRouter) ----
+        private static readonly GraphClickRouter _graphClicks = new();
+
+        /// <summary>Called from <c>Window.Graph.BuildContents</c>: is the mouse over the graph (not a popup/other window)?</summary>
+        public static void ReportGraphHovered(bool hovered) => _graphClicks.ReportGraphHovered(hovered);
+
+        /// <summary>Called first in <c>FancyInputHandler.Update</c>: a fresh click on the graph is not blocked by another panel's focus.</summary>
+        public static void BeforeMouseInput(DSAnimStudio.FancyInputHandler input)
+        {
+            if (!ReferenceEquals(input, DSAnimStudio.Main.Input)) return;
+            try { _graphClicks.BeforeMouseInput(); } catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Called when a move/resize drag on a TAE block is released: true when nothing moved (a plain click, which with
+        /// DSAS 4.9.9 selection starts a "Move" drag). DSAS would still record an undo step and mark the anim modified.
+        /// </summary>
+        public static bool IsNoOpBlockDrag(DSAnimStudio.TaeEditor.NewGraphInput drag) =>
+            drag.CurrentDragType is DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.Move
+                or DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.ResizeLeft or DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.ResizeRight
+            && drag.MoveResizeDragFrameDelta == 0
+            && (drag.CurrentDragType != DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.Move || drag.MoveResizeDragRowDelta == 0);
+
+        [System.Runtime.InteropServices.DllImport("cimgui", CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        private static extern IntPtr igGetCurrentWindow();
+        [System.Runtime.InteropServices.DllImport("cimgui", CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        private static extern void igBringWindowToDisplayFront(IntPtr window);
+
+        /// <summary>
+        /// Called by DSAS's hover tooltip window (inside its Begin) instead of <c>ImGui.SetWindowFocus()</c>: draws it on
+        /// top without taking keyboard focus. Taking focus made ImGui hand focus, once the tooltip closed, to the most
+        /// recently focused window (often the Lua editor), which then blocked the graph's mouse input (drag/resize).
+        /// </summary>
+        public static void BringTooltipToFront()
+        {
+            try { IntPtr w = igGetCurrentWindow(); if (w != IntPtr.Zero) igBringWindowToDisplayFront(w); }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Height for DSAS's "Documents" strip window: from its top down to where the main dock space starts. DSAS asked
+        /// for 4 px, which ImGui raised to the 32 px minimum window size, so the invisible strip covered the top of the
+        /// dock tabs below it (Animations / Graph / Lua Editor tabs only reacted on their lower half).
+        /// </summary>
+        public static Vector2 DocManToolbarSize(ImGuiViewportPtr viewport) =>
+            new(viewport.Size.X, viewport.WorkPos.Y - viewport.Pos.Y + DSAnimStudio.ImguiOSD.OSD.DocManToolbarHeight);
+
+        /// <summary>Pushed around the Documents strip's Begin so <see cref="DocManToolbarSize"/> is not raised to 32 px.</summary>
+        public static void PushDocManToolbarStyle() => ImGui.PushStyleVar(ImGuiStyleVar.WindowMinSize, new Vector2(1, 1));
 
         /// <summary>Called from DSAS's "Action Graph" menu.</summary>
         public static void BuildGraphMenuItems()

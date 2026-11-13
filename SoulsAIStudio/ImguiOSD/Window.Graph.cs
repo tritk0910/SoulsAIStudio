@@ -35,6 +35,7 @@ namespace DSAnimStudio.ImguiOSD
             protected override void BuildContents(ref bool anyFieldFocused)
             {
                 float cursorX = ImGui.GetCursorPosX() - 8;
+                SoulsAiStudio.App.SasHooks.ReportGraphHovered(ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows)); // [SAS] first click on the graph works
 
                 CustomBackgroundColor = System.Numerics.Vector4.Zero;
                 

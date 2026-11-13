@@ -32,6 +32,11 @@ namespace SoulsAiStudio.App
         public bool Lighting499 { get; set; } = true;
         /// <summary>Version of the skybox/cubemap preset already applied once (DSAS keeps the user's later choice in its config).</summary>
         public int SkyboxPresetVersion { get; set; }
+        /// <summary>
+        /// 1 = DSAS's "Use Old Action Select Behavior" was switched on once (DSAS 4.9.9: one click on any block selects it
+        /// and starts the drag/resize). DSAS keeps the user's later choice (Action Graph menu) in its own config.
+        /// </summary>
+        public int GraphSelectPresetVersion { get; set; }
         /// <summary>Toolbox [Lighting] values DSAS does not save itself (see ViewportLightingStore). Null = never changed.</summary>
         public Dictionary<string, float>? ViewportLighting { get; set; }
 

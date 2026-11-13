@@ -41,13 +41,14 @@ namespace DSAnimStudio.ImguiOSD
                 ClipDockTabArea = false;
 
                 ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0);
+                SoulsAiStudio.App.SasHooks.PushDocManToolbarStyle(); // [SAS] no 32 px min height: it covered the dock tabs below
 
                 
             }
 
             protected override void PostUpdate()
             {
-                ImGui.PopStyleVar();
+                ImGui.PopStyleVar(2); // [SAS] + PushDocManToolbarStyle
             }
 
             protected override void BuildContents(ref bool anyFieldFocused)
@@ -56,7 +57,7 @@ namespace DSAnimStudio.ImguiOSD
                 var vpWorkSize = viewport.Size;
                 var vpWorkPos = viewport.Pos;
                 ImGui.SetWindowPos(new Vector2(vpWorkPos.X, vpWorkPos.Y + OSD.DocManToolbarOffset));
-                ImGui.SetWindowSize(new Vector2(vpWorkSize.X, OSD.DocManToolbarHeight));
+                ImGui.SetWindowSize(SoulsAiStudio.App.SasHooks.DocManToolbarSize(viewport)); // [SAS] end where the dock space starts
 
 
                 //ImGui.Text("DocMan Test");

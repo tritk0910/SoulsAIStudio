@@ -664,6 +664,7 @@ namespace DSAnimStudio
 
         public void Update(Rectangle mouseCursorUpdateRect, bool forceUpdate, bool disableIfFieldsFocused)
         {
+            SoulsAiStudio.App.SasHooks.BeforeMouseInput(this); // [SAS] a click on the TAE graph isn't swallowed by another panel's focus
 
 
             if (!Main.ActiveHyst || (ImguiOSD.OSD.AnyFieldFocused && disableIfFieldsFocused))

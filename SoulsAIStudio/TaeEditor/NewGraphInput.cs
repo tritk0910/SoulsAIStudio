@@ -609,6 +609,7 @@ namespace DSAnimStudio.TaeEditor
                         else
                             Graph.MainScreen.NewSelectedActions = dragActions.ToList();
                     }
+                    else if (SoulsAiStudio.App.SasHooks.IsNoOpBlockDrag(this)) { } // [SAS] plain click on a block: no undo step, anim not marked modified
                     else if (!isReadOnly && CurrentDragType is DragTypes.ResizeLeft)
                     {
                         var dragActions = GetCurrentDragActions();

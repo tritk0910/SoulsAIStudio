@@ -34,6 +34,7 @@ namespace SoulsAiStudio.App
         private readonly ComboPanel _combo;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
+        private SasInputProbe? _probe;
 
         public SasApp()
         {
@@ -144,6 +145,15 @@ namespace SoulsAiStudio.App
                 Settings.SkyboxPresetVersion = 1;
                 Settings.Save();
             }
+            // TAE graph like DSAS 4.9.9: dragging an unselected block selects it and drags at once (once; DSAS saves it).
+            if (Settings.GraphSelectPresetVersion < 1 && DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen != null
+                && DSAnimStudio.Main.Config != null)
+            {
+                DSAnimStudio.Main.Config.UseOldActionSelectBehavior = true;
+                DSAnimStudio.Main.SaveConfig(); // DSAS otherwise saves it only on a clean exit
+                Settings.GraphSelectPresetVersion = 1;
+                Settings.Save();
+            }
             bool focused = false;
             focused |= _start.Build();
             focused |= _wizard.Build();
@@ -163,6 +173,7 @@ namespace SoulsAiStudio.App
             }
             SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
             BuildErrorPopup();
+            if (SasInputProbe.Enabled) (_probe ??= new SasInputProbe()).Draw(focused);
             // While any of our windows has focus, DSAS's TAE shortcuts must not fire (CLAUDE.md §6 key routing).
             if (focused) anyFieldFocused = true;
         }
