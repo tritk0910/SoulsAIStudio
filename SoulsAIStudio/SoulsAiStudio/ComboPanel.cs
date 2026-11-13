@@ -122,6 +122,12 @@ namespace SoulsAiStudio.App
             ImGui.TextDisabled($"line {_goal.Line + 1}");
             ImGui.SameLine();
             ImGui.Checkbox("Follow cursor", ref _follow);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("On: this tab shows the goal the Lua editor cursor is in. Move the cursor into another\n" +
+                                 "Goal.XXX function and the combo here switches to it (your branch/interrupt choices reset).\n" +
+                                 "Clicking an anim in this tab jumps the editor there but keeps this goal.\n\n" +
+                                 "Off: this tab stays on the current goal, wherever you move the cursor.\n" +
+                                 "Useful to keep a combo while you read Goal.Interrupt or another goal.");
 
             if (_spEventsAnibnd != _app.Bridge.LoadedAnibnd) { _spEvents.Clear(); _spEventsAnibnd = _app.Bridge.LoadedAnibnd; }
             var path = BuildPath(_nodes, 0);
