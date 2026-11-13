@@ -82,6 +82,16 @@ public static class ComboSequence
         return false;
     }
 
+    /// <summary>True when any arm (any path) adds a subgoal with an anim.</summary>
+    public static bool HasSteps(IReadOnlyList<ComboNode> nodes) =>
+        nodes.Any(n => n is ComboStep || n is ComboBranch b && b.Arms.Any(a => HasSteps(a.Body)));
+
+    /// <summary>
+    /// An interrupt body that can change what is playing: it clears the queue or adds anims on some path.
+    /// Bodies that only set numbers/timers and <c>return true</c> leave the current anim running.
+    /// </summary>
+    public static bool AffectsCombo(IReadOnlyList<ComboNode> nodes) => ContainsClear(nodes) || HasSteps(nodes);
+
     /// <summary>True when any arm (any path) contains a <c>ClearSubGoal()</c>.</summary>
     public static bool ContainsClear(IReadOnlyList<ComboNode> nodes) =>
         nodes.Any(n => n is ComboClear || n is ComboBranch b && b.Arms.Any(a => ContainsClear(a.Body)));

@@ -269,3 +269,30 @@ public class InterruptClearInBranchTests
         Assert.False(ComboSequence.ClearsOnPath(h.Body, _ => 1));  // "no branch taken" arm does not
     }
 }
+
+public class InterruptNoOpTests
+{
+    [Fact]
+    public void HandlerThatOnlySetsNumbers_DoesNotAffectCombo()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local id = arg1:GetSpecialEffectActivateInterruptType(0)
+                if arg1:IsInterupt(INTERUPT_ActivateSpecialEffect) then
+                    if id == 3710020 then
+                        arg1:SetNumber(0, 0)
+                        return true
+                    elseif id == 3710030 then
+                        arg2:ClearSubGoal()
+                        arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3050, TARGET_ENE_0, 999, 0, 0)
+                        return true
+                    end
+                end
+                return false
+            end
+            """;
+        var t = SpEffectInterrupts.Build(src);
+        Assert.False(ComboSequence.AffectsCombo(t.Handlers[3710020].Body));
+        Assert.True(ComboSequence.AffectsCombo(t.Handlers[3710030].Body));
+    }
+}

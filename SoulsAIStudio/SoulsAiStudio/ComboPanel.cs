@@ -40,7 +40,7 @@ namespace SoulsAiStudio.App
         {
             _app = app;
             _editor = editor;
-            _manual = new ComboScriptTab(app, id => _handlers != null && _handlers.Handlers.TryGetValue(id, out var h) && !h.Replans ? h : null);
+            _manual = new ComboScriptTab(app, id => _handlers != null && _handlers.Handlers.TryGetValue(id, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body) ? h : null);
         }
 
         /// <summary>BeginTabItem with flags but without a close button (ImGui.NET 1.87 only has the p_open overload).</summary>
@@ -212,9 +212,12 @@ namespace SoulsAiStudio.App
                 var chosen = ChosenInterrupt(s, depth);
                 if (chosen == null || depth >= MaxInterruptDepth) { result.Add(new PathItem(s, null)); continue; }
                 var (frame, handler) = chosen.Value;
-                result.Add(new PathItem(s, frame, handler.SpEffectId));
                 var rest = BuildPath(handler.Body, depth + 1);
-                if (ComboSequence.ClearsOnPath(handler.Body, ChosenArm)) { result.AddRange(rest); return result; }
+                bool clears = ComboSequence.ClearsOnPath(handler.Body, ChosenArm);
+                // The chosen arm neither clears nor adds anims (e.g. random arm "no branch taken"): the anim keeps playing.
+                if (!clears && rest.Count == 0) { result.Add(new PathItem(s, null)); continue; }
+                result.Add(new PathItem(s, frame, handler.SpEffectId));
+                if (clears) { result.AddRange(rest); return result; }
                 (appendAfter ??= new()).AddRange(rest);
             }
             if (appendAfter != null) result.AddRange(appendAfter);
@@ -227,7 +230,7 @@ namespace SoulsAiStudio.App
             var events = SpEvents(animId);
             var result = new List<(int, float, SpEffectHandler)>();
             foreach (var e in events)
-                if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans) result.Add((e.SpEffectId, e.Frame, h));
+                if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body)) result.Add((e.SpEffectId, e.Frame, h));
             return result;
         }
 
