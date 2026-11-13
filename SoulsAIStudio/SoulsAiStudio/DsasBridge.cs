@@ -94,13 +94,13 @@ namespace SoulsAiStudio.App
         /// <summary>TAE event types that apply a SpEffect (param s32 at 0x0 = SpEffect id) — CLAUDE.md §4.3.</summary>
         private static readonly int[] SpEffectEventTypes = { 67, 66, 302, 401, 331, 797 };
 
-        /// <summary>SpEffect events in an anim's TAE: (SpEffect id, start frame), sorted by time. Empty if not loaded.</summary>
-        public IReadOnlyList<(int SpEffectId, float Frame)> GetSpEffectEvents(int animId) =>
+        /// <summary>SpEffect events in an anim's TAE: (SpEffect id, start frame, end frame), sorted by time. Empty if not loaded.</summary>
+        public IReadOnlyList<(int SpEffectId, float Frame, float EndFrame)> GetSpEffectEvents(int animId) =>
             Events(animId, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0);
 
         /// <summary>JumpTable flags in an anim's TAE: (flag, start frame), sorted by time. Empty if not loaded.</summary>
         public IReadOnlyList<(int Flag, float Frame)> GetJumpTableEvents(int animId) =>
-            Events(animId, a => a.Type == JumpTableEventType);
+            Events(animId, a => a.Type == JumpTableEventType).Select(e => (e.Value, e.Frame)).ToList();
 
         /// <summary>Start frame of the anim's "End If AI ComboAttack Queued" window (where a queued next anim takes over), or null.</summary>
         public float? GetComboQueuedFrame(int animId)
@@ -110,23 +110,23 @@ namespace SoulsAiStudio.App
             return null;
         }
 
-        /// <summary>(s32 at 0x0, start frame) of the matching events of an anim, sorted by time.</summary>
-        private static IReadOnlyList<(int Value, float Frame)> Events(int animId, Func<DSAProj.Action, bool> match)
+        /// <summary>(s32 at 0x0, start frame, end frame) of the matching events of an anim, sorted by time.</summary>
+        private static IReadOnlyList<(int Value, float Frame, float EndFrame)> Events(int animId, Func<DSAProj.Action, bool> match)
         {
             try
             {
                 var doc = zzz_DocumentManager.CurrentDocument;
                 var proj = doc?.EditorScreen?.Proj;
-                if (doc == null || proj == null || !doc.EditorScreen.IsFileOpen) return Array.Empty<(int, float)>();
+                if (doc == null || proj == null || !doc.EditorScreen.IsFileOpen) return Array.Empty<(int, float, float)>();
                 var taeAnim = proj.SAFE_GetFirstAnimationFromFullID(SplitAnimID.FromFullID(doc.GameRoot, animId));
-                if (taeAnim == null) return Array.Empty<(int, float)>();
+                if (taeAnim == null) return Array.Empty<(int, float, float)>();
                 float snap = TaeExtensionMethods.GetCurrentSnapInterval();
                 return taeAnim.SAFE_GetActions()
                     .Where(a => match(a) && a.ParameterBytes != null && a.ParameterBytes.Length >= 4)
-                    .Select(a => (BitConverter.ToInt32(a.ParameterBytes, 0), a.StartTime / snap))
+                    .Select(a => (BitConverter.ToInt32(a.ParameterBytes, 0), a.StartTime / snap, a.EndTime / snap))
                     .OrderBy(x => x.Item2).ToList();
             }
-            catch (Exception) { return Array.Empty<(int, float)>(); }
+            catch (Exception) { return Array.Empty<(int, float, float)>(); }
         }
 
         /// <summary>
@@ -172,9 +172,15 @@ namespace SoulsAiStudio.App
                 else if (req.ForcedCut is float fc) { end = fc; reason = req.ForcedReason ?? "forced cut"; }
                 else if (req.Cut.SpEffectId is int sp)
                 {
-                    float? f = FirstFrame(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp);
-                    if (f is float sf) { end = sf; reason = $"SpEffect {sp}"; }
-                    else { reason = $"SpEffect {sp} not in TAE → anim end"; warn = true; }
+                    var w = FirstWindow(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp);
+                    if (w is not { } win) { reason = $"SpEffect {sp} not in TAE → anim end"; warn = true; }
+                    else if (req.Cut.AtFrame is float at)
+                    {
+                        end = Math.Clamp(at, win.Start, win.End);
+                        reason = $"SpEffect {sp} @ f{end:0} (active f{win.Start:0}–{win.End:0})";
+                        if (at < win.Start || at > win.End) { reason += $": f{at:0} is outside, clamped"; warn = true; }
+                    }
+                    else { end = win.Start; reason = $"SpEffect {sp}"; }
                 }
                 else if (req.Cut.JumpTableFlag >= 0)
                 {
@@ -192,6 +198,17 @@ namespace SoulsAiStudio.App
             if (screen.PlaybackCursor != null) screen.PlaybackCursor.IsPlaying = false;
             interactor.RequestCombo(entries);
             return plans;
+        }
+
+        /// <summary>Start/end frame of the earliest matching event.</summary>
+        private static (float Start, float End)? FirstWindow(DSAProj.Animation taeAnim, float snap, Func<DSAProj.Action, bool> match, int value)
+        {
+            (float Start, float End)? best = null;
+            foreach (var act in taeAnim.SAFE_GetActions())
+                if (match(act) && act.ParameterBytes is { Length: >= 4 } pb && BitConverter.ToInt32(pb, 0) == value
+                    && (best == null || act.StartTime / snap < best.Value.Start))
+                    best = (act.StartTime / snap, act.EndTime / snap);
+            return best;
         }
 
         private static float? FirstFrame(DSAProj.Animation taeAnim, float snap, Func<DSAProj.Action, bool> match, int value)

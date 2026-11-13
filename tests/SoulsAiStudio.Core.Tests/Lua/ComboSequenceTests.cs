@@ -296,3 +296,37 @@ public class InterruptNoOpTests
         Assert.True(ComboSequence.AffectsCombo(t.Handlers[3710030].Body));
     }
 }
+
+public class InterruptConditionalTests
+{
+    [Fact]
+    public void DistanceInsideBody_And_TimerInArm_AreConditional_RandomOnlyIsNot()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local getDist = arg1:GetDist(TARGET_ENE_0)
+                local r = arg1:GetRandam_Int(1, 100)
+                local id = arg1:GetSpecialEffectActivateInterruptType(0)
+                if arg1:IsInterupt(INTERUPT_ActivateSpecialEffect) then
+                    if id == 5358 then
+                        if getDist >= 4.5 then
+                            arg2:ClearSubGoal()
+                            arg2:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 3049, TARGET_ENE_0, 9999, 0)
+                        end
+                    elseif id == 100 and r <= 40 then
+                        arg2:ClearSubGoal()
+                        arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3001, TARGET_ENE_0, 999, 0, 0)
+                    elseif id == 200 and r <= 40 and arg1:IsFinishTimer(8) == true then
+                        arg2:ClearSubGoal()
+                        arg2:AddSubGoal(GOAL_COMMON_ComboRepeat, 10, 3002, TARGET_ENE_0, 999, 0, 0)
+                    end
+                end
+                return false
+            end
+            """;
+        var t = SpEffectInterrupts.Build(src);
+        Assert.True(t.Handlers[5358].IsConditional);
+        Assert.False(t.Handlers[100].IsConditional);
+        Assert.True(t.Handlers[200].IsConditional);
+    }
+}

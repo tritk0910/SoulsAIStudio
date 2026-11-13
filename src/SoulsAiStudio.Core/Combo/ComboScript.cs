@@ -5,7 +5,9 @@ namespace SoulsAiStudio.Core.Combo;
 /// <summary>How an anim of a combo ends (and the next one takes over).</summary>
 /// <param name="JumpTableFlag">Cut at the start of this JumpTable (TAE type 0) flag, e.g. 23 = "End If AI ComboAttack Queued"; -1 = play to the end (NoCancel).</param>
 /// <param name="SpEffectId">Cut at the start of this SpEffect event instead (Goal.Interrupt style); JumpTableFlag is then ignored.</param>
-public sealed record ComboCut(int JumpTableFlag, int? SpEffectId = null)
+/// <param name="AtFrame">With SpEffectId: cut at this frame inside the SpEffect event's window instead of its start
+/// (a SpEffect can re-trigger the interrupt every interval while active, e.g. once a distance check passes).</param>
+public sealed record ComboCut(int JumpTableFlag, int? SpEffectId = null, float? AtFrame = null)
 {
     public static readonly ComboCut ComboAttackQueued = new(ComboScript.EnemyComboAtkFlag);
     public static readonly ComboCut NoCancel = new(-1);
@@ -39,6 +41,7 @@ public sealed record ComboScriptResult(IReadOnlyList<ComboScriptStep> Steps, IRe
 /// <code>
 /// EnemyComboAtk 3002            # 4.9.9: keyword = how the previous anim ends (JumpTable flag 23 here)
 /// SpEffect 5060030 3060         # new: previous anim ends at its SpEffect 5060030 event
+/// SpEffect 5358@30 3049         # new: … at frame 30, inside that SpEffect event's window
 /// NoCancel 3016 [start] [end]   # previous anim plays to its end; optional start/end frames (4.9.9)
 /// </code>
 /// 4.9.9's Set* commands are recognized and reported as not supported.
@@ -59,7 +62,7 @@ public static class ComboScript
 
     /// <summary>Keyword for a JumpTable flag (the 4.9.9 name if there is one).</summary>
     public static string KeywordFor(ComboCut cut) =>
-        cut.SpEffectId is int sp ? $"{SpEffectKeyword} {sp}"
+        cut.SpEffectId is int sp ? $"{SpEffectKeyword} {sp}" + (cut.AtFrame is float at ? FormattableString.Invariant($"@{at:0.##}") : "")
         : CancelKeywords.FirstOrDefault(kv => kv.Value == cut.JumpTableFlag).Key ?? $"JumpTable {cut.JumpTableFlag}";
 
     public static ComboScriptResult Parse(string text)
@@ -77,9 +80,19 @@ public static class ComboScript
             int k; // index of the anim token
             if (t[0].Equals(SpEffectKeyword, StringComparison.OrdinalIgnoreCase))
             {
-                if (t.Length < 2 || !int.TryParse(t[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sp))
-                { diags.Add(new(ln, "SpEffect needs an id: SpEffect <id> <anim>", true)); continue; }
-                cut = new ComboCut(-1, sp);
+                string spText = t.Length >= 2 ? t[1] : "";
+                float? at = null;
+                int atIdx = spText.IndexOf('@');
+                if (atIdx >= 0)
+                {
+                    if (!TryFrame(spText[(atIdx + 1)..], out float a))
+                    { diags.Add(new(ln, "SpEffect <id>@<frame>: the frame after @ is not a number", true)); continue; }
+                    at = a;
+                    spText = spText[..atIdx];
+                }
+                if (!int.TryParse(spText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sp))
+                { diags.Add(new(ln, "SpEffect needs an id: SpEffect <id> <anim>  (or SpEffect <id>@<frame> <anim>)", true)); continue; }
+                cut = new ComboCut(-1, sp, at);
                 k = 2;
             }
             else if (t[0].Equals("JumpTable", StringComparison.OrdinalIgnoreCase))

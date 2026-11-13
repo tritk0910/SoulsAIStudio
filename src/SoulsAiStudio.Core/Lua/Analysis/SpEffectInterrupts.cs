@@ -6,11 +6,18 @@ namespace SoulsAiStudio.Core.Lua.Analysis;
 /// <param name="Line">0-based line of the arm (<c>elseif interruptSpeffect == S then</c>).</param>
 /// <param name="ClearsQueue">The arm starts with <c>ClearSubGoal()</c>: its steps replace the rest of the current combo.</param>
 /// <param name="Condition">The arm's full condition (may add e.g. <c>and interruptRand &lt;= 75</c> or a timer check).</param>
-public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null)
+public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null, bool NonRandomCondition = false)
 {
     /// <summary>Chance (0–100) that the arm fires when the SpEffect activates, from <c>and rand &lt;= N</c> in its
     /// condition; null = no random part (timer/state checks are not counted).</summary>
     public double ChancePercent => Chance ?? 100;
+
+    /// <summary>
+    /// Whether it fires depends on game state the app cannot roll: the arm condition has parts other than the SpEffect
+    /// test and a random roll (distance, timers, HasSpecialEffectId, HP…), or the body branches on such a condition.
+    /// Random path never picks these; the user decides.
+    /// </summary>
+    public bool IsConditional => NonRandomCondition || ComboSequence.HasNonRandomBranch(Body);
 
     /// <summary>The arm tests more than <c>v == S</c> (extra random/timer/state conditions).</summary>
     public bool HasExtraCondition => Condition.Contains(" and ", StringComparison.Ordinal);
@@ -64,13 +71,26 @@ public static class SpEffectInterrupts
                     foreach (int id in SpEffectIds(arm.Condition, spVars))
                         handlers.TryAdd(id, new SpEffectHandler(id, line,
                             arm.Body.FirstOrDefault() is ComboClear,
-                            Replans(src, t, line, endLine, arm), arm.Body, arm.Condition, RandomChance(arm.Condition, randVars)));
+                            Replans(src, t, line, endLine, arm), arm.Body, arm.Condition, RandomChance(arm.Condition, randVars), HasNonRandomPart(arm.Condition, spVars, randVars)));
                 }
         }
         return new Table(handlers, observed);
     }
 
     /// <summary><c>... and r &lt;= 75</c> with r a GetRandam_Int(1, 100) variable → 75 (smallest if several).</summary>
+    /// <summary>A part of <c>a and b or c</c> that is neither <c>sp == N</c> nor <c>rand &lt;= N</c>.</summary>
+    private static bool HasNonRandomPart(string condition, HashSet<string> spVars, HashSet<string> randVars)
+    {
+        foreach (var part in condition.Split(new[] { " and ", " or " }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var t = part.Trim().Trim('(', ')', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            bool sp = t.Length == 3 && spVars.Contains(t[0]) && t[1] == "==";
+            bool rand = t.Length == 3 && randVars.Contains(t[0]) && (t[1] == "<=" || t[1] == "<" || t[1] == ">" || t[1] == ">=");
+            if (!sp && !rand) return true;
+        }
+        return false;
+    }
+
     private static double? RandomChance(string condition, HashSet<string> randVars)
     {
         double? chance = null;

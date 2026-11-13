@@ -45,3 +45,16 @@ public class ComboScriptTests
         Assert.Equal(5060030, r.OwnCuts(false)[1].SpEffectId);
     }
 }
+
+public class ComboScriptAtFrameTests
+{
+    [Fact]
+    public void SpEffectAtFrame_ParsesAndFormats()
+    {
+        var r = ComboScript.Parse("EnemyComboAtk 3049\nSpEffect 5358@30 3049\nSpEffect 5358@x 3049\n");
+        var cut = r.OwnCuts(false)[0];
+        Assert.Equal((5358, 30f), (cut.SpEffectId!.Value, cut.AtFrame!.Value));
+        Assert.Single(r.Diagnostics, d => d.IsError);
+        Assert.Equal("SpEffect 5358@30", ComboScript.KeywordFor(cut));
+    }
+}

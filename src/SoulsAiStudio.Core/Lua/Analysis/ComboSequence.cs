@@ -82,6 +82,10 @@ public static class ComboSequence
         return false;
     }
 
+    /// <summary>True when some branch is decided by game state (distance, HP, SpEffect…), not a random roll.</summary>
+    public static bool HasNonRandomBranch(IReadOnlyList<ComboNode> nodes) =>
+        Branches(nodes).Any(b => b.Arms.Any(a => a.Probability == null && a.Condition != "(no branch taken)"));
+
     /// <summary>True when any arm (any path) adds a subgoal with an anim.</summary>
     public static bool HasSteps(IReadOnlyList<ComboNode> nodes) =>
         nodes.Any(n => n is ComboStep || n is ComboBranch b && b.Arms.Any(a => HasSteps(a.Body)));
