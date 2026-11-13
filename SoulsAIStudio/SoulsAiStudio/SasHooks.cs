@@ -82,6 +82,24 @@ namespace SoulsAiStudio.App
             DSAnimStudio.ViewportEnvironment.LightRotationH = lighting499 ? -0.75f : 0.2f;
             DSAnimStudio.ViewportEnvironment.LightRotationV = lighting499 ? -0.75f : -0.2f;
             DSAnimStudio.ViewportEnvironment.SSSMult = lighting499 ? 0f : 2f;
+            // Tonemap (not saved by DSAS, so applied on every launch).
+            DSAnimStudio.ViewportEnvironment.FlverSceneBrightness = lighting499 ? 2f : 1f;
+            DSAnimStudio.ViewportEnvironment.FlverSceneContrast = lighting499 ? 0.5f : 0.6f;
+        }
+
+        /// <summary>
+        /// Skybox part of the preset: "Show Cubemap As Skybox" and the cubemap (DefaultCubemap_Old for the 4.9.9 look).
+        /// DSAS saves these in its own config, so this runs once (and when the menu toggle changes), never on every launch.
+        /// Returns false while DSAS has not loaded its cubemaps yet.
+        /// </summary>
+        public static bool ApplySkyboxPreset(bool lighting499)
+        {
+            var names = DSAnimStudio.ViewportEnvironment.CubemapNames;
+            if (names == null || names.Length == 0) return false;
+            int idx = Array.FindIndex(names, n => string.Equals(n, lighting499 ? "DefaultCubemap_Old" : "DefaultCubemap", StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) DSAnimStudio.ViewportEnvironment.CubemapNameIndex = idx;
+            DSAnimStudio.ViewportEnvironment.DrawCubemap = lighting499;
+            return true;
         }
 
         /// <summary>Initial sound volume for each new DSAS document (DSAS kept it per document and reset it to 100).</summary>

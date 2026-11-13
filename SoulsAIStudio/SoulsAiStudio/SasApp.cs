@@ -133,6 +133,13 @@ namespace SoulsAiStudio.App
             }
 
             HandleComboSpace();
+            // Skybox preset once, after DSAS has loaded its config and cubemaps (an editor document exists).
+            if (Settings.SkyboxPresetVersion < 1 && DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen != null
+                && SasHooks.ApplySkyboxPreset(Settings.Lighting499))
+            {
+                Settings.SkyboxPresetVersion = 1;
+                Settings.Save();
+            }
             bool focused = false;
             focused |= _start.Build();
             focused |= _wizard.Build();
@@ -189,11 +196,13 @@ namespace SoulsAiStudio.App
                 Settings.Lighting499 = !Settings.Lighting499;
                 Settings.Save();
                 SasHooks.ApplyLightingPreset(Settings.Lighting499);
+                SasHooks.ApplySkyboxPreset(Settings.Lighting499);
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("On: light from the side and above, normal ambient, no subsurface wrap: clear light/dark sides (DSAS 4.9.9).\n" +
-                                 "Off: DSAS 5.0 lighting (light from near the camera, double ambient, SSS): brighter but flatter.\n" +
-                                 "Fine-tune with Toolbox > Lighting (Light H / Light V, Global SSS Mult).");
+                ImGui.SetTooltip("On: light from the side and above, normal ambient, no subsurface wrap: clear light/dark sides (DSAS 4.9.9),\n" +
+                                 "tonemap brightness 2 / contrast 0.5, skybox on with DefaultCubemap_Old.\n" +
+                                 "Off: DSAS 5.0 lighting (light from near the camera, double ambient, SSS, no skybox): brighter but flatter.\n" +
+                                 "Fine-tune with Window > Toolbox > [Lighting].");
             if (ImGui.MenuItem("Blend Root Motion (DSAS 4.9.9)", "", Settings.BlendRootMotion))
             {
                 Settings.BlendRootMotion = !Settings.BlendRootMotion;

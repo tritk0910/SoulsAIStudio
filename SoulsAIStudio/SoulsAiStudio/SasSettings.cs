@@ -29,6 +29,8 @@ namespace SoulsAiStudio.App
         public bool BlendRootMotion { get; set; } = true;
         /// <summary>Viewport lighting like DSAS 4.9.9 (side light, ambient x1, no SSS wrap). See SasHooks.ApplyLightingPreset.</summary>
         public bool Lighting499 { get; set; } = true;
+        /// <summary>Version of the skybox/cubemap preset already applied once (DSAS keeps the user's later choice in its config).</summary>
+        public int SkyboxPresetVersion { get; set; }
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies
