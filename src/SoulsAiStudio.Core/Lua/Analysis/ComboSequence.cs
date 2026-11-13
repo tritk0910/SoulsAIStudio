@@ -65,6 +65,27 @@ public static class ComboSequence
         return result;
     }
 
+    /// <summary>
+    /// True when the chosen path runs a <c>ClearSubGoal()</c> (also one nested in a branch arm): in an interrupt handler
+    /// that drops the whole current queue, so the handler's steps replace the rest of the combo instead of being appended.
+    /// </summary>
+    public static bool ClearsOnPath(IReadOnlyList<ComboNode> nodes, Func<ComboBranch, int> choose)
+    {
+        foreach (var n in nodes)
+            switch (n)
+            {
+                case ComboClear: return true;
+                case ComboBranch b when b.Arms.Count > 0:
+                    if (ClearsOnPath(b.Arms[Math.Clamp(choose(b), 0, b.Arms.Count - 1)].Body, choose)) return true;
+                    break;
+            }
+        return false;
+    }
+
+    /// <summary>True when any arm (any path) contains a <c>ClearSubGoal()</c>.</summary>
+    public static bool ContainsClear(IReadOnlyList<ComboNode> nodes) =>
+        nodes.Any(n => n is ComboClear || n is ComboBranch b && b.Arms.Any(a => ContainsClear(a.Body)));
+
     /// <summary>All branches in document order (for building a branch-choice UI).</summary>
     public static IEnumerable<ComboBranch> Branches(IReadOnlyList<ComboNode> nodes)
     {

@@ -190,7 +190,7 @@ namespace SoulsAiStudio.App
                 _interrupt[(s.Line, level)] = pick;
                 if (pick < 0) continue;
                 RollInterrupts(c[pick].Handler.Body, level + 1);
-                if (c[pick].Handler.ClearsQueue) return;
+                if (ComboSequence.ClearsOnPath(c[pick].Handler.Body, ChosenArm)) return;
             }
         }
 
@@ -214,7 +214,7 @@ namespace SoulsAiStudio.App
                 var (frame, handler) = chosen.Value;
                 result.Add(new PathItem(s, frame, handler.SpEffectId));
                 var rest = BuildPath(handler.Body, depth + 1);
-                if (handler.ClearsQueue) { result.AddRange(rest); return result; }
+                if (ComboSequence.ClearsOnPath(handler.Body, ChosenArm)) { result.AddRange(rest); return result; }
                 (appendAfter ??= new()).AddRange(rest);
             }
             if (appendAfter != null) result.AddRange(appendAfter);
@@ -280,7 +280,7 @@ namespace SoulsAiStudio.App
                 {
                     var h = c[i].Handler;
                     string text = $"SpEffect {c[i].SpEffectId} @ frame {c[i].Frame:0} -> Goal.Interrupt line {h.Line + 1}"
-                        + (h.ClearsQueue ? " (ClearSubGoal)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.HasExtraCondition ? " [conditional]" : "");
+                        + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.HasExtraCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _plan = null; }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.HasExtraCondition ? "\n(the arm has extra conditions; it only fires when they hold)" : ""));
                 }
@@ -319,7 +319,7 @@ namespace SoulsAiStudio.App
                             if (ChosenInterrupt(s, level) is { } ci && level < MaxInterruptDepth)
                             {
                                 ImGui.Indent((depth + 1) * 14 + 2);
-                                ImGui.TextColored(Theme.Warn, $"SpEffect {ci.Handler.SpEffectId} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ci.Handler.ClearsQueue ? ", ClearSubGoal" : ""));
+                                ImGui.TextColored(Theme.Warn, $"SpEffect {ci.Handler.SpEffectId} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, ChosenArm) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
                                 ImGui.Unindent((depth + 1) * 14 + 2);
                                 DrawNodes(ci.Handler.Body, depth + 1, level + 1);
                             }

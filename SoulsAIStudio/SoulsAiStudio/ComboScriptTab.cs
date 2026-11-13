@@ -248,7 +248,7 @@ namespace SoulsAiStudio.App
                 if (h != null) ImGui.PopStyleColor();
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip(h == null ? "Goal.Interrupt of the open script has no branch for this SpEffect"
-                        : $"Goal.Interrupt line {h.Line + 1}: if {h.Condition}" + (h.ClearsQueue ? "\nClearSubGoal, then: " : "\nthen: ")
+                        : $"Goal.Interrupt line {h.Line + 1}: if {h.Condition}" + (ComboSequence.ContainsClear(h.Body) ? "\nClearSubGoal, then: " : "\nthen: ")
                           + string.Join(" → ", ComboSequence.Flatten(h.Body, _ => 0).Select(x => x.AnimId)));
                 if (click) ApplyCut($"{ComboScript.SpEffectKeyword} {sp}");
             }
@@ -299,7 +299,7 @@ namespace SoulsAiStudio.App
                     var sb = new System.Text.StringBuilder();
                     sb.Append($"# SpEffect interrupt, from your files:\n");
                     sb.Append($"# {anim} has a SpEffect {sp} event at frame {frame:0}. Goal.Interrupt (line {h.Line + 1}) handles it")
-                      .Append(h.ClearsQueue ? " with ClearSubGoal + a new combo,\n" : " with a new combo,\n");
+                      .Append(ComboSequence.ContainsClear(h.Body) ? " with ClearSubGoal + a new combo,\n" : " with a new combo,\n");
                     sb.Append($"# so {anim} is cut at frame {frame:0} and {string.Join(" → ", chain)} plays next.\n");
                     sb.Append($"EnemyComboAtk {anim}\n");
                     sb.Append($"SpEffect {sp} {chain[0]}\n");

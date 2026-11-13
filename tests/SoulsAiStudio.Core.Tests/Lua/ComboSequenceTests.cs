@@ -240,3 +240,32 @@ public class SpEffectInterruptChanceTests
         Assert.Null(table.Handlers[5060030].Chance);
     }
 }
+
+public class InterruptClearInBranchTests
+{
+    [Fact]
+    public void ClearSubGoal_InsideChosenArm_ReplacesQueue()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local random = arg1:GetRandam_Int(1, 100)
+                local sp = arg1:GetSpecialEffectActivateInterruptType(0)
+                if arg1:IsInterupt(INTERUPT_ActivateSpecialEffect) then
+                    if sp == 7400258 then
+                        if random <= 66 then
+                            arg2:ClearSubGoal()
+                            arg2:AddSubGoal(GOAL_COMMON_AttackImmediateAction, 10, 3068, TARGET_ENE_0, 999, 0, 0)
+                        end
+                        return true
+                    end
+                end
+                return false
+            end
+            """;
+        var h = SpEffectInterrupts.Build(src).Handlers[7400258];
+        Assert.False(h.ClearsQueue);                       // first statement is the if, not ClearSubGoal
+        Assert.True(ComboSequence.ContainsClear(h.Body));
+        Assert.True(ComboSequence.ClearsOnPath(h.Body, _ => 0));   // random <= 66 arm clears
+        Assert.False(ComboSequence.ClearsOnPath(h.Body, _ => 1));  // "no branch taken" arm does not
+    }
+}
