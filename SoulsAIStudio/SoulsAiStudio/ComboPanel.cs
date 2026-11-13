@@ -153,7 +153,28 @@ namespace SoulsAiStudio.App
             if (_plan != null) DrawPlan();
         }
 
-        private int ChosenArm(ComboBranch b) => _choice.TryGetValue(b.Line, out int k) ? k : 0;
+        private int ChosenArm(ComboBranch b) => _choice.TryGetValue(b.Line, out int k) ? k : DefaultArm(b);
+
+        private const string NoBranchTaken = "(no branch taken)";
+
+        /// <summary>
+        /// A branch decided by game state (distance, HP, SpEffect…) with no <c>else</c> defaults to "(no branch taken)":
+        /// nothing happens unless the user says the condition holds. Random branches default to their first arm.
+        /// </summary>
+        private static int DefaultArm(ComboBranch b)
+        {
+            if (b.Arms.Any(a => a.Probability != null)) return 0;
+            int none = b.Arms.Count - 1;
+            return none >= 0 && b.Arms[none].Condition == NoBranchTaken ? none : 0;
+        }
+
+        /// <summary>Dropdown order: for state-decided branches "(no branch taken)" comes first.</summary>
+        private static IEnumerable<int> ArmOrder(ComboBranch b)
+        {
+            int def = DefaultArm(b);
+            if (def != 0) yield return def;
+            for (int k = 0; k < b.Arms.Count; k++) if (k != def || def == 0) yield return k;
+        }
 
         private void RollRandom()
         {
@@ -373,7 +394,7 @@ namespace SoulsAiStudio.App
                             {
                                 try
                                 {
-                                    for (int k = 0; k < b.Arms.Count; k++)
+                                    foreach (int k in ArmOrder(b))
                                         if (ImGui.Selectable(ArmLabel(b.Arms[k]) + $"##arm{k}", k == chosen)) { _choice[b.Line] = k; _plan = null; }
                                 }
                                 finally { ImGui.EndCombo(); }
