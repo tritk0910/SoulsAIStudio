@@ -31,6 +31,33 @@ namespace SoulsAiStudio.App
         private string _filter = "";
         private bool _onlyCurrentAnim;
 
+        /// <summary>
+        /// ON/OFF button drawn right after a "StateInfo" field in the Parameters panel: toggles that StateInfo for viewport
+        /// simulation, same data as Entity > StateInfo Toggle (not saved to the project json on toggle, like DSAS).
+        /// </summary>
+        public static void ParameterToggle(string? paramName, int stateInfo)
+        {
+            if (!string.Equals(paramName, "StateInfo", StringComparison.OrdinalIgnoreCase) || stateInfo < 0) return;
+            var entity = OSD.WindowEntity;
+            if (entity == null) return;
+            bool on = entity.IsStateInfoEnabled(stateInfo);
+            ImGui.SameLine();
+            ImGui.PushStyleColor(ImGuiCol.Button, on ? new Vector4(0.20f, 0.45f, 0.20f, 1f) : new Vector4(0.30f, 0.30f, 0.30f, 1f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, on ? new Vector4(0.25f, 0.55f, 0.25f, 1f) : new Vector4(0.40f, 0.40f, 0.40f, 1f));
+            bool click = ImGui.SmallButton((on ? "ON" : "OFF") + $"##sas_si_param_{stateInfo}");
+            ImGui.PopStyleColor(2);
+            if (ImGui.IsItemHovered())
+            {
+                string name = entity.GetStateInfoSelectConfig_Names().TryGetValue(stateInfo, out var n) && !string.IsNullOrEmpty(n) ? $" ({n})" : "";
+                ImGui.SetTooltip($"StateInfo {stateInfo}{name} is {(on ? "ON" : "OFF")}: events with this StateInfo are " +
+                                 (on ? "simulated" : "ignored") + " in the viewport.\nClick to toggle (same as Entity > StateInfo Toggle).");
+            }
+            if (!click) return;
+            var enabled = entity.GetStateInfoSelectConfig_Enabled();
+            enabled[stateInfo] = !on;
+            entity.SetStateInfoSelectConfig_Enabled(enabled); // also adds an empty name entry if missing (DSAS behavior)
+        }
+
         /// <summary>Draws the section. Always returns true (the caller's DSAS version is then skipped).</summary>
         public bool Draw(Window.Entity entity, TaeEditorScreen? tae, ref bool anyFieldFocused)
         {

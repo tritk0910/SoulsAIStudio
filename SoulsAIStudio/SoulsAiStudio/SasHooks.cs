@@ -211,8 +211,16 @@ namespace SoulsAiStudio.App
         /// <summary>Replaces DSAS's <c>Main.Config.NewRelativeTimelineScrubEnabled</c> checks (click in the ruler, per-frame scroll).</summary>
         public static bool UseRelativeTimelineScrub()
         {
-            try { return ScrubFollow.UseRelativeScrub; }
+            // "Center Playhead While Scrubbing" ON uses DSAS 5.0's relative scrub: the view re-centers on the playhead
+            // and the mouse pointer is moved onto it, exactly the centered drag users know (user request).
+            try { return ScrubFollow.UseRelativeScrub || ScrubFollow.Enabled; }
             catch (Exception) { return false; }
+        }
+
+        /// <summary>Called by DSAS's Parameters panel after each integer field (StateInfo gets an ON/OFF toggle).</summary>
+        public static void ParameterRowExtras(string? paramName, int value)
+        {
+            try { StateInfoPanel.ParameterToggle(paramName, value); } catch (Exception ex) { App.ReportError("StateInfo toggle", ex); }
         }
 
         /// <summary>Replaces DSAS's "Relative Timeline Scrub - Enabled" checkbox in the Action Graph menu.</summary>

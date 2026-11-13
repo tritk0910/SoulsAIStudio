@@ -134,10 +134,10 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Center Playhead While Scrubbing", "", Enabled))
                 Enabled = !Enabled;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("On: while dragging the time cursor, keep the playhead centered and scroll the timeline under it.\n" +
+                ImGui.SetTooltip("On: while dragging the time cursor, the timeline re-centers on the playhead and the mouse is moved onto it (DSAS 5.0 relative scrub).\n" +
                                  "Off (default, like DSAS 4.9.9): the cursor follows the mouse; the timeline only scrolls\n" +
                                  "when you drag to (or past) its left/right edge. Hold Shift while dragging: no auto-scroll.\n" +
-                                 "Ignored while DSAS's \"Relative Timeline Scrub - Enabled\" is on.");
+                                 "The \"Relative Timeline Scrub\" sub-options (sync mouse, sensitivity…) apply while this is on.");
         }
     }
 }
