@@ -42,6 +42,12 @@ namespace SoulsAiStudio.App
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies
+        /// <summary>
+        /// TAE graph: use DSAS 5.0's "Relative Timeline Scrub" (mouse is warped onto the playhead, the graph re-centers on it
+        /// every frame). Off by default: DSAS 5.0 ships it on, and it overrides both the 4.9.9 drag and our centering mode.
+        /// DSAS's own <c>NewRelativeTimelineScrubEnabled</c> config value is ignored (existing configs all say true).
+        /// </summary>
+        public bool UseDsasRelativeScrub { get; set; } = false;
 
         /// <summary>
         /// Per-user data folder. <c>SOULSAISTUDIO_USERDATA</c> overrides it (used by UI tests so they never touch the

@@ -208,6 +208,19 @@ namespace SoulsAiStudio.App
             catch (Exception) { return false; }
         }
 
+        /// <summary>Replaces DSAS's <c>Main.Config.NewRelativeTimelineScrubEnabled</c> checks (click in the ruler, per-frame scroll).</summary>
+        public static bool UseRelativeTimelineScrub()
+        {
+            try { return ScrubFollow.UseRelativeScrub; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>Replaces DSAS's "Relative Timeline Scrub - Enabled" checkbox in the Action Graph menu.</summary>
+        public static void RelativeScrubMenuItem()
+        {
+            try { ScrubFollow.RelativeScrubMenuItem(); } catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
         // ---- TAE graph: mouse focus (see GraphClickRouter) ----
         private static readonly GraphClickRouter _graphClicks = new();
 

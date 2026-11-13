@@ -49,7 +49,7 @@ namespace DSAnimStudio.ImguiOSD
 
                 ImGui.Separator();
                 
-                Tae.Config.NewRelativeTimelineScrubEnabled = Checkbox("Relative Timeline Scrub - Enabled", Tae.Config.NewRelativeTimelineScrubEnabled);
+                SoulsAiStudio.App.SasHooks.RelativeScrubMenuItem(); // [SAS] "Relative Timeline Scrub - Enabled" bound to the Souls AI setting (default off)
                 Tae.Config.NewRelativeTimelineScrubSyncMouseToPlaybackCursor = Checkbox("Relative Timeline Scrub - Sync Mouse To Playback Cursor", Tae.Config.NewRelativeTimelineScrubSyncMouseToPlaybackCursor);
                 Tae.Config.NewRelativeTimelineScrubHideMouseCursor = Checkbox("Relative Timeline Scrub - Hide Mouse", Tae.Config.NewRelativeTimelineScrubHideMouseCursor);
                 Tae.Config.NewRelativeTimelineScrubScrollScreen = Checkbox("Relative Timeline Scrub - Scroll Screen", Tae.Config.NewRelativeTimelineScrubScrollScreen);

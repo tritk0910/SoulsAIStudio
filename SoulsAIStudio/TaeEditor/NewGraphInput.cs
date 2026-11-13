@@ -260,7 +260,7 @@ namespace DSAnimStudio.TaeEditor
                     WasPlayingBeforeTimelineDrag = Graph.PlaybackCursor.IsPlaying;
                     Graph.PlaybackCursor.IsPlaying = false;
                     Graph.PlaybackCursor.Scrubbing = true;
-                    if (Main.Config.NewRelativeTimelineScrubEnabled)
+                    if (SoulsAiStudio.App.SasHooks.UseRelativeTimelineScrub()) // [SAS] DSAS 5.0 relative scrub (warps mouse, centers playhead) is opt-in
                     {
                         if (Main.Config.NewRelativeTimelineScrubHideMouseCursor)
                             Program.MainInstance.IsMouseVisible = false;

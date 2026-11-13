@@ -47,10 +47,29 @@ namespace SoulsAiStudio.App
                 $"ignoreUntilUp={input?.IsIgnoringMouseButtonsUntilAllAreUp} lHeld={input?.LeftClickHeld} " +
                 $"drag={graph?.InputMan?.CurrentDragType} docHovered={doc.Hovered} docRect=({doc.LastPosition.Y:0},{doc.LastSize.Y:0})";
             ImGui.GetForegroundDrawList().AddText(new System.Numerics.Vector2(8, ImGui.GetIO().DisplaySize.Y - 20), 0xFF00FFFF, state);
+            LogScrub(graph, input);
             if (state == _last) return;
             _last = state;
             if (_logPath != null)
                 try { File.AppendAllText(_logPath, $"{_frame} {state}{Environment.NewLine}"); } catch (IOException) { }
+        }
+
+        /// <summary>While the time cursor is dragged: mouse X vs playhead screen X vs graph scroll X, one line per frame.</summary>
+        private void LogScrub(DSAnimStudio.TaeEditor.NewGraph? graph, DSAnimStudio.FancyInputHandler? input)
+        {
+            if (_logPath == null || graph?.PlaybackCursor == null || graph.LayoutManager == null || input == null) return;
+            var drag = graph.InputMan?.CurrentDragType;
+            if (!input.LeftClickHeld || drag is not (DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.TimelineScrub
+                    or DSAnimStudio.TaeEditor.NewGraphInput.DragTypes.TimelineScrub_Relative)) return;
+            float t = (float)graph.PlaybackCursor.GUICurrentTime;
+            float headX = t * graph.LayoutManager.SecondsPixelSize - graph.ScrollViewer.RoundedScroll.X + graph.ScrollViewerContentsRect.X;
+            try
+            {
+                File.AppendAllText(_logPath, $"{_frame} SCRUB drag={drag} mouseX={input.MousePosition.X:0} headX={headX:0} " +
+                    $"scrollX={graph.ScrollViewer.Scroll.X:0} t={t:0.000} max={graph.PlaybackCursor.MaxTime:0.000} " +
+                    $"area=({graph.WholeScrollViewerRect.Left},{graph.WholeScrollViewerRect.Right}){Environment.NewLine}");
+            }
+            catch (IOException) { }
         }
     }
 }

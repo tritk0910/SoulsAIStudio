@@ -590,7 +590,7 @@ namespace DSAnimStudio.TaeEditor
                     // }
                     //
 
-                    if ((Graph.PlaybackCursor.IsPlaying && Main.Config.AutoScrollDuringAnimPlayback) || (Main.Config.NewRelativeTimelineScrubEnabled && Main.Config.NewRelativeTimelineScrubScrollScreen && Graph.PlaybackCursor.Scrubbing))
+                    if ((Graph.PlaybackCursor.IsPlaying && Main.Config.AutoScrollDuringAnimPlayback) || (SoulsAiStudio.App.SasHooks.UseRelativeTimelineScrub() && Main.Config.NewRelativeTimelineScrubScrollScreen && Graph.PlaybackCursor.Scrubbing)) // [SAS] no per-frame re-centering during absolute scrub
                     {
                         Graph.LayoutManager.ScrollToPlaybackCursor(-1, modTime: true);
                     }
