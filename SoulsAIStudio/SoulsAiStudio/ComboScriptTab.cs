@@ -242,7 +242,7 @@ namespace SoulsAiStudio.App
             foreach (var (sp, frame, endFrame) in sps)
             {
                 var h = _handlerFor(sp);
-                string label = $"SpEffect {sp}   f{frame:0}–{endFrame:0}" + (h != null ? (h.IsConditional ? "   [Interrupt, conditional]" : "   [Interrupt]") : "");
+                string label = $"SpEffect {sp}   f{frame:0}–{endFrame:0}" + (h != null ? (h.DependsOnDistance ? "   [Interrupt, distance]" : "   [Interrupt]") : "");
                 if (h != null) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
                 bool click = ImGui.Selectable(label + $"##s{k++}", false);
                 if (h != null) ImGui.PopStyleColor();
@@ -294,7 +294,7 @@ namespace SoulsAiStudio.App
                 foreach (var (sp, frame, _) in _app.Bridge.GetSpEffectEvents(anim))
                 {
                     var h = _handlerFor(sp);
-                    if (h == null || h.IsConditional) continue;
+                    if (h == null || h.DependsOnDistance) continue;
                     var chain = ComboSequence.Flatten(h.Body, _ => 0).Select(x => x.AnimId).ToList();
                     if (chain.Count == 0) continue;
                     var sb = new System.Text.StringBuilder();

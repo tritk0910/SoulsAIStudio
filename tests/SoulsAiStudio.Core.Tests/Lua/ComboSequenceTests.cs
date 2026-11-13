@@ -325,8 +325,45 @@ public class InterruptConditionalTests
             end
             """;
         var t = SpEffectInterrupts.Build(src);
-        Assert.True(t.Handlers[5358].IsConditional);
-        Assert.False(t.Handlers[100].IsConditional);
-        Assert.True(t.Handlers[200].IsConditional);
+        Assert.True(t.Handlers[5358].DependsOnDistance);
+        Assert.False(t.Handlers[100].DependsOnDistance || t.Handlers[100].HasStateCondition);
+        Assert.False(t.Handlers[200].DependsOnDistance); // timer: not distance…
+        Assert.True(t.Handlers[200].HasStateCondition);  // …but a game-state check (coin flip in Random path)
+    }
+}
+
+public class InterruptDistanceTracingTests
+{
+    [Fact]
+    public void DistanceFoundByAssignment_NotByName()
+    {
+        const string src = """
+            Goal.Interrupt = function(arg0, arg1, arg2)
+                local foo = arg1:GetDist(TARGET_ENE_0)
+                local bar = foo - arg1:GetMapHitRadius(TARGET_SELF)
+                local dist = arg1:GetHpRate(TARGET_SELF)
+                local id = arg1:GetSpecialEffectActivateInterruptType(0)
+                if arg1:IsInterupt(INTERUPT_ActivateSpecialEffect) then
+                    if id == 1 then
+                        if bar >= 3 then
+                            arg2:ClearSubGoal()
+                            arg2:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 3049, TARGET_ENE_0, 9999, 0)
+                        end
+                    elseif id == 2 and dist <= 0.5 then
+                        arg2:ClearSubGoal()
+                        arg2:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 3050, TARGET_ENE_0, 9999, 0)
+                    elseif id == 3 and arg1:GetDist(TARGET_ENE_0) < 2 then
+                        arg2:ClearSubGoal()
+                        arg2:AddSubGoal(GOAL_COMMON_ComboFinal, 10, 3051, TARGET_ENE_0, 9999, 0)
+                    end
+                end
+                return false
+            end
+            """;
+        var t = SpEffectInterrupts.Build(src);
+        Assert.True(t.Handlers[1].DependsOnDistance);   // bar <- foo <- GetDist
+        Assert.False(t.Handlers[2].DependsOnDistance);  // "dist" is HP rate
+        Assert.True(t.Handlers[2].HasStateCondition);
+        Assert.True(t.Handlers[3].DependsOnDistance);   // direct GetDist call
     }
 }

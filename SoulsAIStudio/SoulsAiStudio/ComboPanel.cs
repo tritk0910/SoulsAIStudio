@@ -137,8 +137,9 @@ namespace SoulsAiStudio.App
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
             ImGui.SameLine();
             if (ImGui.Button("Random path")) { RollRandom(); Play(BuildPath(_nodes, 0)); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Rolls the random branches and random SpEffect interrupts.\n" +
-                "Interrupts that depend on game state (distance, timers, HasSpecialEffectId…) are never picked: choose them yourself.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Rolls the random branches and the SpEffect interrupts (tried in time order, each with its\n" +
+                "rand <= N chance; other game-state checks such as timers count as 50/50).\n" +
+                "Interrupts that test the distance to the target are never picked: choose them yourself.");
             ImGui.SameLine();
             if (ImGui.Button(_app.Bridge.ComboPaused ? "▶ Resume" : "|| Pause")) _app.Bridge.ToggleComboPause();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Space also pauses/resumes the combo");
@@ -221,8 +222,15 @@ namespace SoulsAiStudio.App
                 for (int k = 0; k < c.Count && pick < 0; k++)
                 {
                     if (queued is float q && c[k].Frame >= q) continue;
-                    if (c[k].Handler.IsConditional) continue; // distance/timer/state: the user decides (option 2)
-                    if (_rng.NextDouble() * 100 < c[k].Handler.ChancePercent) pick = k;
+                    var h = c[k].Handler;
+                    if (h.DependsOnDistance) continue; // distance: the user decides (and picks the trigger frame)
+                    // Random part of the arm (rand <= N); other game-state checks (timers, SpEffects…) = coin flip.
+                    double chance = h.ChancePercent * (h.HasStateCondition ? 0.5 : 1);
+                    if (_rng.NextDouble() * 100 >= chance) continue;
+                    // The arms rolled inside the handler may do nothing (e.g. "no branch taken"): then the anim keeps
+                    // playing and a later SpEffect can still interrupt it.
+                    if (!ComboSequence.ClearsOnPath(h.Body, ChosenArm) && ComboSequence.Flatten(h.Body, ChosenArm).Count == 0) continue;
+                    pick = k;
                 }
                 _interrupt[(s.Line, level)] = pick;
                 if (pick < 0) continue;
@@ -334,7 +342,7 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
             string label = k >= 0 && k < c.Count
-                ? $"SpEffect {c[k].SpEffectId} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.IsConditional ? " [conditional]" : "")
+                ? $"SpEffect {c[k].SpEffectId} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.DependsOnDistance ? " [distance]" : c[k].Handler.HasStateCondition ? " [conditional]" : "")
                 : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available)";
             if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label)) return;
             try
@@ -344,10 +352,10 @@ namespace SoulsAiStudio.App
                 {
                     var h = c[i].Handler;
                     string text = $"SpEffect {c[i].SpEffectId} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
-                        + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.IsConditional ? " [conditional]" : "");
+                        + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.DependsOnDistance ? " [distance]" : h.HasStateCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _trigger.Remove((s.Line, depth)); _plan = null; }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.IsConditional
-                        ? "\n[conditional]: depends on game state (distance, timers, SpEffects…), so Random path never picks it.\nCheck the conditions in the code and choose the trigger frame yourself."
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.DependsOnDistance
+                        ? "\n[distance]: tests the distance to the target, so Random path never picks it.\nCheck the conditions in the code and choose the trigger frame yourself."
                         : ""));
                 }
             }
