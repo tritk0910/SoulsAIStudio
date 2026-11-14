@@ -22,7 +22,7 @@ namespace SoulsAiStudio.App
         public static volatile bool GraphHidden;
 
         public const string AppName = "Souls AI Studio";
-        public const string AppVersion = "0.1.1";
+        public const string AppVersion = "0.2.0";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
@@ -73,6 +73,20 @@ namespace SoulsAiStudio.App
                 act.NewSimulationActive = ReferenceEquals(act, hover);
             }
             catch (Exception) { } // never break DSAS's simulation
+        }
+
+        /// <summary>
+        /// A combo is playing (not paused). NewCombo drives the time itself and sets the playback cursor's IsPlaying to false
+        /// every frame, so DSAS's sound manager treated slot sounds (PlaySound_BySlot…) as stopped and never kept them alive.
+        /// </summary>
+        public static bool ComboIsPlaying(DSAnimStudio.TaeEditor.TaeEditorScreen? tae)
+        {
+            try
+            {
+                var c = tae?.Graph?.ViewportInteractor?.Combo;
+                return c != null && c.PlaybackState == DSAnimStudio.NewCombo.PlaybackStates.Playing && !c.Paused;
+            }
+            catch (Exception) { return false; }
         }
 
         /// <summary>DSAProj: all modified flags cleared (after a save).</summary>

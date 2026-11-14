@@ -1027,7 +1027,7 @@ namespace DSAnimStudio
                             if (!actBox.IsActive)
                                 continue;
 
-                            bool isBoxSoundActive = (actBox.NewSimulationActive /*&& !actBox.NewSimulationEnter*/) && (tae.Graph.PlaybackCursor.IsPlaying || tae.Graph.PlaybackCursor.Scrubbing);
+                            bool isBoxSoundActive = (actBox.NewSimulationActive /*&& !actBox.NewSimulationEnter*/) && (tae.Graph.PlaybackCursor.IsPlaying || tae.Graph.PlaybackCursor.Scrubbing || SoulsAiStudio.App.SasHooks.ComboIsPlaying(tae)); // [SAS] a running combo drives time with IsPlaying=false: keep slot sounds alive
                             if (!isBoxSoundActive)
                                 continue;
 
