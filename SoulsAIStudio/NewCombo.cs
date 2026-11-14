@@ -97,7 +97,7 @@ namespace DSAnimStudio
                 
                 var hkxID = taeAnim.GetHkxID(MainScreen.Proj);
                 MainScreen.SelectNewAnimRef(taeCategory, taeAnim, disableHkxSelect: true);
-                AnimContainer.RequestAnim(NewAnimSlot.SlotTypes.Base, hkxID, true, next.Weight, finalTime, blendDuration);
+                AnimContainer.RequestAnim(NewAnimSlot.SlotTypes.Base, next.AnimationID, true, next.Weight, finalTime, blendDuration); // [SAS] was hkxID: request by TAE id like a normal anim switch, so the slot simulates this anim's own TAE (Blend window, sounds, block highlight)
                 SoulsAiStudio.App.SasHooks.OnComboAnimRequested(AnimContainer, next.IsLoop); // [SAS] no stale sync time (new anim started mid-way), honor entry IsLoop
                 AnimContainer.AccessAnimSlots(slots =>
                 {
