@@ -40,6 +40,10 @@
     <EmbeddedResource Include="EmbRes\Help.txt" />
     <EmbeddedResource Include="EmbRes\imgui_default_Legacy.ini" />
     <EmbeddedResource Include="EmbRes\imgui_default_V5.ini" />
+    <!-- [SAS] Bundled DSLuaDecompiler (MIT, see Tools\DSLuaDecompiler\LICENSE): run as a process for bytecode scripts. -->
+    <None Update="Tools\DSLuaDecompiler\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="Content\Cubemaps\DefaultCubemap.dds">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

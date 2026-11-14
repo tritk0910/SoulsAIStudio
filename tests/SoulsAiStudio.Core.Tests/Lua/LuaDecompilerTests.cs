@@ -11,7 +11,9 @@ namespace SoulsAiStudio.Core.Tests.Lua;
 /// <summary>[Fact] that skips unless DSLuaDecompiler.exe exists at the default path (or %SAS_DECOMPILER%).</summary>
 public sealed class RequiresDecompilerFactAttribute : FactAttribute
 {
-    public static string ExePath => Environment.GetEnvironmentVariable("SAS_DECOMPILER") is { Length: > 0 } p ? p : LuaDecompiler.DefaultExePath;
+    /// <summary>%SAS_DECOMPILER%, else the copy bundled in the repo (<c>SoulsAIStudio\Tools\DSLuaDecompiler</c>).</summary>
+    public static string ExePath => Environment.GetEnvironmentVariable("SAS_DECOMPILER") is { Length: > 0 } p ? p
+        : Path.Combine(TestPaths.RepoRoot ?? "", "SoulsAIStudio", "Tools", "DSLuaDecompiler", "DSLuaDecompiler.exe");
     public RequiresDecompilerFactAttribute()
     {
         if (!TestPaths.HasTestData) Skip = TestPaths.MissingTestDataReason;

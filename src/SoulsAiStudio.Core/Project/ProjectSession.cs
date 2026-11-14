@@ -47,8 +47,7 @@ public sealed class ProjectSession
         Project = project;
         Catalog = new ScriptCatalog(project.GameDir, project.ModDir);
         Backups = new BackupService(project.BackupDir, project.ModDir);
-        _decompiler = new LuaDecompiler(
-            string.IsNullOrEmpty(project.DecompilerPath) ? decompilerExe : project.DecompilerPath, project.CacheDir);
+        _decompiler = new LuaDecompiler(LuaDecompiler.ResolveExePath(project.DecompilerPath, decompilerExe), project.CacheDir);
     }
 
     public SasProject Project { get; }

@@ -11,7 +11,7 @@ namespace SoulsAiStudio.App
     /// <summary>Per-user app settings (<c>%AppData%\SoulsAiStudio\settings.json</c>).</summary>
     public sealed class SasSettings
     {
-        public string DecompilerPath { get; set; } = LuaDecompiler.DefaultExePath;
+        public string DecompilerPath { get; set; } = ""; // empty = the bundled Tools/DSLuaDecompiler (see LuaDecompiler.ResolveExePath)
         public string LastGameDir { get; set; } = "";
         public string LastModDir { get; set; } = "";
         public string LastProjectFolder { get; set; } = "";

@@ -4,15 +4,30 @@ using SoulsAiStudio.Core.IO;
 namespace SoulsAiStudio.Core.Lua.Decompile;
 
 /// <summary>
-/// Runs the external <c>DSLuaDecompiler.exe</c> (.NET 7 CLI) on HavokScript bytecode. Results are cached by
-/// content hash so each file is decompiled at most once per project.
+/// Runs <c>DSLuaDecompiler.exe</c> (.NET 7 CLI, bundled with the app in <c>Tools\DSLuaDecompiler\</c>) on HavokScript
+/// bytecode as a separate process. Results are cached by content hash so each file is decompiled at most once per project.
 /// </summary>
 public sealed class LuaDecompiler(string exePath, string cacheDir)
 {
-    /// <summary>Default guess (the user's modding tools folder); the real path comes from app settings.</summary>
+    /// <summary>Old default (a modding tools folder); only a fallback now that the decompiler ships with the app.</summary>
     public static string DefaultExePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "Downloads", "modding", "DSLuaDecompiler", "DSLuaDecompiler.exe");
+
+    /// <summary>The copy shipped next to the app: <c>&lt;app&gt;\Tools\DSLuaDecompiler\DSLuaDecompiler.exe</c>.</summary>
+    public static string BundledExePath => Path.Combine(AppContext.BaseDirectory, "Tools", "DSLuaDecompiler", "DSLuaDecompiler.exe");
+
+    /// <summary>
+    /// The exe to use: an explicit per-project override if it exists, else the bundled copy, else the path from app
+    /// settings (older setups). Never null; may not exist (then <see cref="IsAvailable"/> is false).
+    /// </summary>
+    public static string ResolveExePath(string? projectOverride, string? settingsPath)
+    {
+        if (!string.IsNullOrWhiteSpace(projectOverride) && File.Exists(projectOverride)) return projectOverride;
+        if (File.Exists(BundledExePath)) return BundledExePath;
+        if (!string.IsNullOrWhiteSpace(settingsPath) && File.Exists(settingsPath)) return settingsPath;
+        return BundledExePath;
+    }
 
     public bool IsAvailable => File.Exists(exePath);
 
@@ -24,7 +39,8 @@ public sealed class LuaDecompiler(string exePath, string cacheDir)
         string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytecode))[..16];
         string cached = Path.Combine(cacheDir, "decompiled", $"{Path.GetFileNameWithoutExtension(fileName)}.{hash}.lua");
         if (File.Exists(cached)) return await File.ReadAllTextAsync(cached, ct);
-        if (!IsAvailable) throw new FileNotFoundException("DSLuaDecompiler.exe not found. Set its path in settings.", exePath);
+        if (!IsAvailable)
+            throw new FileNotFoundException($"DSLuaDecompiler.exe not found (it ships in the app's Tools\\DSLuaDecompiler folder): {exePath}", exePath);
 
         string work = Path.Combine(Path.GetTempPath(), "SoulsAiStudio", "decompile", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
@@ -38,7 +54,12 @@ public sealed class LuaDecompiler(string exePath, string cacheDir)
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // It finds Resources\VariableNamePatterns.json next to itself; also run it from there.
+                WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(exePath)) ?? "",
             };
+            // Built for .NET 7 (end of life). Major roll-forward: .NET 7 if installed, else the next installed major
+            // (the .NET 9/10 runtime this app already needs), so nothing else has to be installed.
+            psi.Environment["DOTNET_ROLL_FORWARD"] = "Major";
             psi.ArgumentList.Add(input);
             psi.ArgumentList.Add("-c");
             using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start DSLuaDecompiler.");

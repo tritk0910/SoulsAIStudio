@@ -58,7 +58,8 @@ Dự án là **fork của DS Anim Studio**. Không viết lại những gì DSAS
 ### 3.1 DSLuaDecompiler
 - Bản có sẵn: `DSLuaDecompiler.exe` + `LuaDecompilerCore.dll`, target **.NET 7** (cần .NET 7 runtime).
 - CLI: `DSLuaDecompiler.exe <files...> [-o <output>] [-c]` (`-c` = in ra console).
-- Cách tích hợp mặc định: **gọi exe như process ngoài** (an toàn, không phụ thuộc target framework của DSAS). Đường dẫn exe nằm trong app settings (mặc định đường dẫn trên), **không hardcode trong code**.
+- Cách tích hợp mặc định: **gọi exe như process ngoài** (an toàn, không phụ thuộc target framework của DSAS).
+- **Đã đóng gói kèm app** (2026-11-13): bản build ở trên (fork ElaDiDu, có `Resources/VariableNamePatterns.json` cho tên arg dễ đọc) nằm trong `SoulsAIStudio/Tools/DSLuaDecompiler/` (MIT, kèm LICENSE; xem `THIRD_PARTY.md`), copy cạnh exe khi build/publish. Thứ tự tìm: `DecompilerPath` của project → bản đi kèm → `DecompilerPath` trong settings. Chạy với `DOTNET_ROLL_FORWARD=Major` nên máy chỉ có .NET 9/10 vẫn chạy được (đã so: 272 file bytecode cho output giống hệt nhau trên .NET 7/9/10).
 - Chỉ khi DSAS chạy .NET ≥ 7 mới cân nhắc reference thẳng `LuaDecompilerCore.dll`.
 - Decompile chỉ chạy **một lần** khi mở một file bytecode lần đầu; kết quả plain text được cache trong project (mục P0 Project). Thực tế phần lớn file trong luabnd là bytecode (xem mục 2), nên decompile là đường dùng thường xuyên, không phải ngoại lệ.
 

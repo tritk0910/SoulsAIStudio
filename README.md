@@ -107,6 +107,7 @@
 * [SoulsAssetPipeline](https://github.com/Meowmaritus/SoulsAssetPipeline)
 * [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT)
 * [Newtonsoft Json.NET](https://www.newtonsoft.com/json)
+* [DSLuaDecompiler](https://github.com/katalash/DSLuaDecompiler) by katalash (build from the [ElaDiDu fork](https://github.com/ElaDiDu/DSLuaDecompiler)), MIT: bundled in `Tools/DSLuaDecompiler` (Souls AI Studio), decompiles bytecode AI scripts. See `THIRD_PARTY.md`.
 * An edited version of MonoGame Framework where I added support for newer texture types.
 * A small portion of [HavokLib](https://github.com/PredatorCZ/HavokLib), specifically the spline-compressed animation decompressor, adapted for C#
 * A small portion of [Horkrux's copy of my fork of Wulf's BND Rebuilder](https://github.com/horkrux/DeS-BNDBuild), specifically the headerization and deswizzling of PS4 and PS3 textures, adapted for C# and modified to load the texture directly into MonoGame instead of save to a file.
