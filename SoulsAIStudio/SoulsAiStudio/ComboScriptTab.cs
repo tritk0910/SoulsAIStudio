@@ -82,7 +82,7 @@ namespace SoulsAiStudio.App
         public void Build()
         {
             bool loaded = _app.Bridge.LoadedAnibnd != null;
-            if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Scripts panel → Load model & anims).");
+            if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Project panel → Load model & anims, or click a character).");
 
             if (ImGui.Button("▶ Play combo")) Play();
             ImGui.SameLine();
@@ -137,7 +137,7 @@ namespace SoulsAiStudio.App
         {
             _parsed = ComboScript.Parse(_text);
             var plan = _app.Bridge.PlayCombo(Requests(), play: true);
-            if (plan == null) { _app.Notify("Load the character first (Scripts panel → Load model & anims)."); _looping = false; return; }
+            if (plan == null) { _app.Notify("Load the character first (Project panel → Load model & anims, or click a character)."); _looping = false; return; }
             if (_parsed.Steps.Count == 0) { _app.Notify("The combo script has no anim lines."); _looping = false; return; }
             _looping = _loop;
             _previewKey = null;

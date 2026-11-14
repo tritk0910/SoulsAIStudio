@@ -26,6 +26,12 @@ public sealed class SasProject
     public string DecompilerPath { get; set; } = "";
 
     public List<ProjectScript> Scripts { get; set; } = [];
+
+    /// <summary>
+    /// Characters (<c>cXXXX</c>) opened directly for animation (TAE) editing, without an AI script. An "animations only"
+    /// project has characters and no scripts.
+    /// </summary>
+    public List<ProjectCharacter> Characters { get; set; } = [];
     public ProjectUiState Ui { get; set; } = new();
 
     /// <summary>Full path of the loaded/saved .sasproj file (not serialized).</summary>
@@ -33,6 +39,8 @@ public sealed class SasProject
     [JsonIgnore] public string ProjectDir => Path.GetDirectoryName(FilePath) ?? "";
     [JsonIgnore] public string BackupDir => Path.Combine(ProjectDir, "backups");
     [JsonIgnore] public string CacheDir => Path.Combine(ProjectDir, "cache");
+    /// <summary>No AI scripts: the project is for animation editing only (Lua editor hidden by default).</summary>
+    [JsonIgnore] public bool IsAnimationsOnly => Scripts.Count == 0;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -48,6 +56,7 @@ public sealed class SasProject
         catch (JsonException ex) { throw new FormatException($"'{path}' is not a valid project file: {ex.Message}", ex); }
         if (project == null) throw new FormatException($"'{path}' is not a valid project file.");
         project.Scripts ??= [];
+        project.Characters ??= [];
         project.Ui ??= new ProjectUiState();
         project.Ui.CursorLineByScript ??= [];
         if (project.FormatVersion > CurrentFormatVersion)
@@ -76,9 +85,13 @@ public sealed class SasProject
     }
 
     /// <summary>Creates the project folder layout (<c>backups/</c>, <c>cache/</c>) and writes the file.</summary>
-    public static SasProject Create(string path, string name, string gameDir, string modDir, IEnumerable<ProjectScript> scripts)
+    public static SasProject Create(string path, string name, string gameDir, string modDir, IEnumerable<ProjectScript> scripts,
+        IEnumerable<ProjectCharacter>? characters = null)
     {
-        var p = new SasProject { Name = name, GameDir = gameDir, ModDir = modDir, Scripts = scripts.ToList() };
+        var p = new SasProject
+        {
+            Name = name, GameDir = gameDir, ModDir = modDir, Scripts = scripts.ToList(), Characters = characters?.ToList() ?? [],
+        };
         p.ThrowIfInvalid();
         p.SaveAs(path);
         Directory.CreateDirectory(p.BackupDir);
@@ -107,8 +120,28 @@ public sealed class ProjectScript
     [JsonIgnore] public string Label => string.IsNullOrEmpty(DisplayName) ? FileName : $"{DisplayName} ({FileName})";
 }
 
+/// <summary>A character opened for animation editing (see <see cref="SasProject.Characters"/>).</summary>
+public sealed class ProjectCharacter
+{
+    /// <summary>Character id, e.g. <c>c5060</c>.</summary>
+    public string ChrId { get; set; } = "";
+
+    /// <summary>Optional name, e.g. "Owl".</summary>
+    public string DisplayName { get; set; } = "";
+
+    [JsonIgnore] public string Label => string.IsNullOrEmpty(DisplayName) ? ChrId : $"{ChrId}  {DisplayName}";
+}
+
+/// <summary>Panel arrangement: <see cref="Ai"/> shows the Lua editor, <see cref="Animation"/> hides it for TAE work.</summary>
+public enum WorkspaceLayout { Ai, Animation }
+
 public sealed class ProjectUiState
 {
     public string? OpenScriptKey { get; set; }
+    /// <summary>Character last opened from <see cref="SasProject.Characters"/>.</summary>
+    public string? OpenCharacter { get; set; }
+    /// <summary>Null = default for the project kind (animations-only → Animation).</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public WorkspaceLayout? Layout { get; set; }
     public Dictionary<string, int> CursorLineByScript { get; set; } = [];
 }

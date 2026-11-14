@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using SoulsAiStudio.Core.IO;
+
 namespace SoulsAiStudio.Core.Project;
 
 /// <summary>Where a character's anibnd/chrbnd were found (mod first, then game).</summary>
@@ -5,6 +8,10 @@ public sealed record CharacterFiles(string ChrId, string AnibndPath, string? Chr
 {
     public bool AnibndFromMod { get; init; }
 }
+
+/// <summary>A character found in the chr folders (mod first, then game).</summary>
+/// <param name="IsStub">The anibnd is tiny (no animations of its own, e.g. variant chrs like c5063).</param>
+public sealed record CharacterCandidate(string ChrId, bool InMod, bool InGame, bool HasChrbnd, bool IsStub);
 
 /// <summary>
 /// Maps an AI script to the character (<c>cXXXX</c>) whose model and animations it drives, and finds the files.
@@ -53,6 +60,72 @@ public sealed class CharacterLocator(string gameDir, string modDir)
             stubFallback ??= files;
         }
         return stubFallback;
+    }
+
+    private static readonly Regex ChrIdPattern = new(@"^c\d{4}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>Normalized chr id (<c>"C5060 "</c> → <c>c5060</c>), or null if it is not <c>c</c> + 4 digits.</summary>
+    public static string? NormalizeChrId(string? chrId)
+    {
+        string id = (chrId ?? "").Trim().ToLowerInvariant();
+        if (id.Length == 4 && id.All(char.IsDigit)) id = "c" + id;
+        return ChrIdPattern.IsMatch(id) ? id : null;
+    }
+
+    /// <summary>Files of an explicit character id (no guessing). Null if it has no anibnd in the mod or the game.</summary>
+    public CharacterFiles? ResolveId(string chrId)
+    {
+        string? id = NormalizeChrId(chrId);
+        if (id == null || AnibndPath(id) is not { } anibnd) return null;
+        return new CharacterFiles(id, anibnd, ChrbndPath(id))
+        {
+            AnibndFromMod = anibnd.StartsWith(Path.GetFullPath(modDir), StringComparison.OrdinalIgnoreCase),
+        };
+    }
+
+    /// <summary>Every <c>cXXXX.anibnd.dcx</c> in the mod's and the game's <c>chr</c> folders, sorted by id.</summary>
+    public IReadOnlyList<CharacterCandidate> Scan()
+    {
+        var mod = AnibndIds(modDir);
+        var game = AnibndIds(gameDir);
+        var result = new List<CharacterCandidate>();
+        foreach (string id in mod.Keys.Union(game.Keys).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            long size = mod.TryGetValue(id, out long m) ? m : game[id];
+            result.Add(new CharacterCandidate(id, mod.ContainsKey(id), game.ContainsKey(id), ChrbndPath(id) != null, size < StubAnibndBytes));
+        }
+        return result;
+    }
+
+    private static Dictionary<string, long> AnibndIds(string root)
+    {
+        var ids = new Dictionary<string, long>(StringComparer.Ordinal);
+        string dir = Path.Combine(root, "chr");
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(dir)) return ids;
+        foreach (string f in Directory.EnumerateFiles(dir, "c*.anibnd.dcx"))
+        {
+            string name = Path.GetFileName(f);
+            if (NormalizeChrId(name[..^".anibnd.dcx".Length]) is { } id && name.Length == id.Length + ".anibnd.dcx".Length)
+                ids[id] = new FileInfo(f).Length;
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// Copies the game's anibnd of <paramref name="chrId"/> into <c>&lt;mod&gt;\chr\</c> so its animations can be edited and
+    /// saved (saves never go to the game folder). Refuses to overwrite an existing mod file. Returns the new path.
+    /// </summary>
+    public string CopyAnibndToMod(string chrId)
+    {
+        string id = NormalizeChrId(chrId) ?? throw new ArgumentException($"'{chrId}' is not a character id like c5060.", nameof(chrId));
+        string source = Path.Combine(gameDir, "chr", id + ".anibnd.dcx");
+        string target = Path.Combine(modDir, "chr", id + ".anibnd.dcx");
+        if (File.Exists(target)) throw new IOException($"{id}.anibnd.dcx already exists in the mod folder.");
+        if (!File.Exists(source)) throw new FileNotFoundException($"{id}.anibnd.dcx is not in the game's chr folder.", source);
+        if (WritePolicy.WhyBlocked(target, [gameDir]) is { } why) throw new InvalidOperationException(why);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        AtomicFile.WriteAllBytes(target, File.ReadAllBytes(source));
+        return target;
     }
 
     private static string? FirstExisting(params string[] paths) => paths.FirstOrDefault(File.Exists);

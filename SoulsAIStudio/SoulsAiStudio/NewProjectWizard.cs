@@ -12,7 +12,8 @@ using SoulsAiStudio.Core.Project;
 namespace SoulsAiStudio.App
 {
     /// <summary>
-    /// Single-screen New Project wizard (ui-spec §2b): game folder → mod folder → pick AI scripts → create.
+    /// Single-screen New Project wizard (ui-spec §2b): game folder → mod folder → pick AI scripts (or, for an
+    /// "Animations only" project, characters) → create.
     /// </summary>
     public sealed class NewProjectWizard
     {
@@ -28,6 +29,13 @@ namespace SoulsAiStudio.App
         private readonly HashSet<ScriptCandidate> _selected = new();
         private string? _validation;
 
+        /// <summary>"Animations only": pick characters (chr folder) instead of AI scripts.</summary>
+        private bool _animsOnly;
+        private bool _hideStubs = true;
+        private Task<IReadOnlyList<CharacterCandidate>>? _chrScan;
+        private IReadOnlyList<CharacterCandidate> _chrCandidates = Array.Empty<CharacterCandidate>();
+        private readonly HashSet<string> _selectedChrs = new();
+
         public NewProjectWizard(SasApp app) => _app = app;
 
         public void Open()
@@ -38,11 +46,13 @@ namespace SoulsAiStudio.App
             _location = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "SoulsAiStudio");
             _name = "";
             _selected.Clear();
+            _selectedChrs.Clear();
+            _chrCandidates = Array.Empty<CharacterCandidate>();
             _candidates.Clear();
             _scanErrors.Clear();
             _validation = null;
             _open = true;
-            if (Directory.Exists(_gameDir) && Directory.Exists(_modDir)) StartScan();
+            if (Directory.Exists(_gameDir) && Directory.Exists(_modDir)) { StartScan(); StartChrScan(); }
         }
 
         /// <returns>True when the window has focus.</returns>
@@ -50,6 +60,7 @@ namespace SoulsAiStudio.App
         {
             if (!_open) return false;
             PollScan();
+            PollChrScan();
 
             var vp = ImGui.GetMainViewport();
             ImGui.SetNextWindowPos(vp.WorkPos + vp.WorkSize * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
@@ -62,22 +73,36 @@ namespace SoulsAiStudio.App
             {
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
 
+                ImGui.TextDisabled("Project type");
+                ImGui.SameLine();
+                if (ImGui.RadioButton("AI scripts + animations", !_animsOnly)) _animsOnly = false;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Edit enemy Lua AI; each script's character (model + animations) is loaded with it.");
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Animations only (no Lua AI)", _animsOnly)) { _animsOnly = true; if (_chrCandidates.Count == 0) StartChrScan(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Just open characters' animations (TAE) for quick editing. No AI script needed.\n" +
+                                                            "Same safety: saves go only into the mod folder, with backups.");
+                ImGui.Spacing();
+
                 Step("1", "Folders");
                 FolderField("Sekiro folder", ref _gameDir, "The game install, unpacked with UXM (contains chr\\, script\\, param\\).");
                 FolderField("Mod folder", ref _modDir, "Your Mod Engine mod, e.g. Sekiro\\mods\\MyMod. Everything is saved here; game files are never touched.");
-                if (ImGui.Button(_scan == null ? "Scan for AI scripts" : "Scanning...") && _scan == null) StartScan();
-                ImGui.SameLine();
-                ImGui.TextDisabled(_candidates.Count > 0 ? $"{_candidates.Count} scripts found" : "");
-                foreach (string e in _scanErrors.Take(3)) ImGui.TextColored(Theme.Warn, e);
+                if (_animsOnly) BuildCharacterStep();
+                else
+                {
+                    if (ImGui.Button(_scan == null ? "Scan for AI scripts" : "Scanning...") && _scan == null) StartScan();
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(_candidates.Count > 0 ? $"{_candidates.Count} scripts found" : "");
+                    foreach (string e in _scanErrors.Take(3)) ImGui.TextColored(Theme.Warn, e);
 
-                ImGui.Spacing();
-                Step("2", "Pick AI scripts");
-                ImGui.SetNextItemWidth(260);
-                ImGui.InputTextWithHint("##filter", "Filter (e.g. 506300, m10)", ref _filter, 64);
-                ImGui.SameLine(); ImGui.Checkbox("Battle scripts only", ref _battleOnly);
-                ImGui.SameLine(); ImGui.Checkbox("Already edited (plain text) only", ref _editedOnly);
-                BuildCandidateTable();
-                ImGui.TextDisabled($"{_selected.Count} selected. Compiled (bytecode) scripts are decompiled when opened.");
+                    ImGui.Spacing();
+                    Step("2", "Pick AI scripts");
+                    ImGui.SetNextItemWidth(260);
+                    ImGui.InputTextWithHint("##filter", "Filter (e.g. 506300, m10)", ref _filter, 64);
+                    ImGui.SameLine(); ImGui.Checkbox("Battle scripts only", ref _battleOnly);
+                    ImGui.SameLine(); ImGui.Checkbox("Already edited (plain text) only", ref _editedOnly);
+                    BuildCandidateTable();
+                    ImGui.TextDisabled($"{_selected.Count} selected. Compiled (bytecode) scripts are decompiled when opened.");
+                }
 
                 ImGui.Spacing();
                 Step("3", "Project");
@@ -136,6 +161,90 @@ namespace SoulsAiStudio.App
                     default: _location = dlg.SelectedPath; break;
                 }
             });
+        }
+
+        // ---------- animations-only: characters ----------
+
+        private void BuildCharacterStep()
+        {
+            if (ImGui.Button(_chrScan == null ? "Scan chr folders" : "Scanning...") && _chrScan == null) StartChrScan();
+            ImGui.SameLine();
+            ImGui.TextDisabled(_chrCandidates.Count > 0 ? $"{_chrCandidates.Count} characters found" : "");
+
+            ImGui.Spacing();
+            Step("2", "Pick characters");
+            ImGui.SetNextItemWidth(260);
+            ImGui.InputTextWithHint("##chrfilter", "Filter (e.g. c5060, 54)", ref _filter, 64);
+            ImGui.SameLine(); ImGui.Checkbox("Hide stubs (no animations)", ref _hideStubs);
+            ImGui.SameLine(); ImGui.Checkbox("In mod only", ref _editedOnly);
+
+            var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable;
+            if (ImGui.BeginTable("##chrs", 4, flags, new Vector2(0, 300)))
+            {
+                ImGui.TableSetupScrollFreeze(0, 1);
+                ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 24);
+                ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Animations from", ImGuiTableColumnFlags.WidthFixed, 150);
+                ImGui.TableSetupColumn("Model", ImGuiTableColumnFlags.WidthFixed, 90);
+                ImGui.TableHeadersRow();
+                try
+                {
+                    foreach (var c in VisibleChrs())
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        bool sel = _selectedChrs.Contains(c.ChrId);
+                        if (ImGui.Checkbox($"##chr_{c.ChrId}", ref sel))
+                        {
+                            if (sel) _selectedChrs.Add(c.ChrId); else _selectedChrs.Remove(c.ChrId);
+                            if (sel && string.IsNullOrWhiteSpace(_name)) _name = $"Anims {c.ChrId}";
+                        }
+                        ImGui.TableNextColumn(); ImGui.Text(c.IsStub ? c.ChrId + "  (stub)" : c.ChrId);
+                        ImGui.TableNextColumn();
+                        if (c.InMod) ImGui.TextColored(Theme.Ok, c.InGame ? "mod (overrides game)" : "mod");
+                        else
+                        {
+                            ImGui.TextDisabled("game (read-only)");
+                            if (ImGui.IsItemHovered())
+                                ImGui.SetTooltip("Only in the game folder, which is never written to (nor opened). To view and edit it,\n" +
+                                                 "click \"Copy to mod\" in the Project panel (copies the anibnd into the mod's chr folder).");
+                        }
+                        ImGui.TableNextColumn();
+                        if (c.HasChrbnd) ImGui.TextDisabled("yes"); else ImGui.TextColored(Theme.Warn, "no");
+                    }
+                }
+                finally { ImGui.EndTable(); }
+            }
+            ImGui.TextDisabled($"{_selectedChrs.Count} selected. More can be added later in the Project panel.");
+        }
+
+        private IEnumerable<CharacterCandidate> VisibleChrs() => _chrCandidates.Where(c =>
+            (!_hideStubs || !c.IsStub || _selectedChrs.Contains(c.ChrId)) &&
+            (!_editedOnly || c.InMod) &&
+            (_filter.Length == 0 || c.ChrId.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+        private void StartChrScan()
+        {
+            _validation = null;
+            if (!Directory.Exists(_gameDir) && !Directory.Exists(_modDir))
+            {
+                _validation = "Pick the Sekiro folder and the mod folder first.";
+                return;
+            }
+            var locator = new CharacterLocator(_gameDir, _modDir);
+            _chrScan = Task.Run(() => locator.Scan());
+        }
+
+        private void PollChrScan()
+        {
+            if (_chrScan is not { IsCompleted: true } t) return;
+            _chrScan = null;
+            if (t.IsCompletedSuccessfully)
+            {
+                _chrCandidates = t.Result;
+                _selectedChrs.RemoveWhere(id => _chrCandidates.All(c => c.ChrId != id));
+            }
+            else _validation = "Could not scan chr folders: " + (t.Exception?.GetBaseException().Message ?? "unknown error");
         }
 
         private void StartScan()
@@ -219,14 +328,18 @@ namespace SoulsAiStudio.App
             _validation = null;
             var folderProblems = SoulsAiStudio.Core.IO.WritePolicy.ValidateFolders(_gameDir, _modDir);
             if (folderProblems.Count > 0) { _validation = string.Join(" ", folderProblems); return; }
-            if (_selected.Count == 0) { _validation = "Select at least one AI script."; return; }
+            if (!_animsOnly && _selected.Count == 0) { _validation = "Select at least one AI script."; return; }
+            if (_animsOnly && _selectedChrs.Count == 0) { _validation = "Select at least one character."; return; }
             if (string.IsNullOrWhiteSpace(_name)) { _validation = "Give the project a name."; return; }
             string path = ProjectPath();
             if (File.Exists(path)) { _validation = "A project with this name already exists there."; return; }
             try
             {
-                var project = SasProject.Create(path, _name.Trim(), _gameDir, _modDir,
-                    _selected.OrderBy(s => s.Luabnd).ThenBy(s => s.FileName).Select(s => s.ToProjectScript()));
+                var project = _animsOnly
+                    ? SasProject.Create(path, _name.Trim(), _gameDir, _modDir, Array.Empty<ProjectScript>(),
+                        _selectedChrs.OrderBy(id => id, StringComparer.Ordinal).Select(id => new ProjectCharacter { ChrId = id }))
+                    : SasProject.Create(path, _name.Trim(), _gameDir, _modDir,
+                        _selected.OrderBy(s => s.Luabnd).ThenBy(s => s.FileName).Select(s => s.ToProjectScript()));
                 _open = false;
                 _app.ActivateProject(project);
             }

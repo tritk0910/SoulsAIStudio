@@ -12,8 +12,10 @@ namespace SoulsAiStudio.App
     /// </summary>
     public sealed class SasLayout
     {
-        public const int CurrentVersion = 3;
-        public const string ScriptsWindow = "Scripts##sas_scripts";
+        public const int CurrentVersion = 4;
+        /// <summary>Left panel (AI scripts, characters, goal outline). Was "Scripts##sas_scripts" before layout v4.</summary>
+        public const string ScriptsWindow = "Project###sas_project";
+        private const string LegacyScriptsWindow = "Scripts##sas_scripts";
         public const string EditorWindow = "Lua Editor##sas_editor";
 
         private readonly Dictionary<string, uint> _dsasDockIds = new();
@@ -47,6 +49,26 @@ namespace SoulsAiStudio.App
             if (!_dsasDockIds.TryGetValue("Graph", out uint graphNode) || graphNode == 0) return;
             _dsasDockIds.TryGetValue("Parameters", out uint paramsNode);
 
+            if (!_requested && settings.LayoutVersion is >= 1 and < 4)
+            {
+                // v4: the "Scripts" panel became "Project" (new window id). Put it where the old one was docked: submit the
+                // old window once (hidden right after: it is never submitted again) to read its dock node.
+                ImGui.SetNextWindowBgAlpha(0);
+                bool shown = ImGui.Begin(LegacyScriptsWindow, ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav);
+                uint oldDock = ImGui.GetWindowDockID();
+                ImGui.End();
+                _ = shown;
+                if (oldDock != 0) igDockBuilderDockWindow(ScriptsWindow, oldDock);
+                else
+                {
+                    igDockBuilderSplitNode(animNode, ImGuiDir.Down, 0.55f, out uint bottom, out uint _);
+                    igDockBuilderDockWindow(ScriptsWindow, bottom);
+                    igDockBuilderFinish(animNode);
+                }
+                settings.LayoutVersion = CurrentVersion;
+                settings.Save();
+                return;
+            }
             if (_requested || settings.LayoutVersion < 1)
             {
                 // v1: split the Animations node (existing windows stay on top, Scripts gets the bottom 55%),

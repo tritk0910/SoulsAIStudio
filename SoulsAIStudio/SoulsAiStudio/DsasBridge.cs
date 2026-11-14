@@ -30,6 +30,13 @@ namespace SoulsAiStudio.App
         /// </summary>
         public void LoadCharacter(CharacterFiles files, string gameDir, string modDir, Action<string>? onLoaded = null)
         {
+            // DSAS writes _DSAS_WORKSPACE.json / .dsaproj next to the anibnd it opens (and asks for a workspace), so an
+            // anibnd from the game folder would get files written into the game folder. Only mod copies are opened.
+            if (!files.AnibndFromMod)
+                throw new InvalidOperationException($"{files.ChrId} only exists in the game folder, which is never written to. " +
+                                                    "Use \"Copy to mod\" (Project panel) to edit a copy in your mod.");
+            // Already open in another DSAS document tab: switch to it instead of opening a duplicate.
+            if (TrySwitchToOpenDocument(files.AnibndPath)) { onLoaded?.Invoke(files.ChrId); return; }
             var doc = zzz_DocumentManager.CurrentDocument ?? throw new InvalidOperationException("DSAS has no document to load into.");
             _pendingAnibnd = Path.GetFullPath(files.AnibndPath);
             // DSAS needs Oodle next to its exe for KRAK files; with the game known (Sekiro) its own helper copies the
@@ -48,6 +55,44 @@ namespace SoulsAiStudio.App
             zzz_DocumentManager.RequestFileOpenRecent = true;
             zzz_DocumentManager.RequestFileOpenRecent_SelectedFile = container;
             zzz_DocumentManager.RequestFileOpenRecent_AfterOpenAction += _ => onLoaded?.Invoke(files.ChrId);
+        }
+
+        private static readonly System.Reflection.FieldInfo? DocumentsField =
+            typeof(zzz_DocumentManager).GetField("Documents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        private static readonly System.Reflection.FieldInfo? SwitchToField =
+            typeof(zzz_DocumentManager).GetField("RequestedDocumentToSwitchTo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        /// <summary>
+        /// If another (not current) DSAS document already has <paramref name="anibndPath"/> open, asks DSAS to switch to it
+        /// (same request its own tab click makes). DSAS has no public API for this, hence reflection on two private fields.
+        /// </summary>
+        private bool TrySwitchToOpenDocument(string anibndPath)
+        {
+            try
+            {
+                if (DocumentsField?.GetValue(null) is not List<zzz_DocumentIns> docs || SwitchToField == null) return false;
+                string want = Path.GetFullPath(anibndPath);
+                var current = zzz_DocumentManager.CurrentDocument;
+                zzz_DocumentIns? match = docs.ToList().FirstOrDefault(d => d != null && !d.IsDisposed && d != current
+                    && d.EditorScreen?.NewFileContainerName is { } n && string.Equals(Path.GetFullPath(n), want, StringComparison.OrdinalIgnoreCase));
+                if (match == null) return false;
+                SwitchToField.SetValue(null, match);
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>True if any DSAS document (current or a background tab) has this anibnd open.</summary>
+        public bool IsOpenAnywhere(string anibndPath)
+        {
+            try
+            {
+                if (DocumentsField?.GetValue(null) is not List<zzz_DocumentIns> docs) return false;
+                string want = Path.GetFullPath(anibndPath);
+                return docs.ToList().Any(d => d != null && !d.IsDisposed && d.EditorScreen?.NewFileContainerName is { } n
+                                              && string.Equals(Path.GetFullPath(n), want, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception) { return false; }
         }
 
         private string? _pendingAnibnd;

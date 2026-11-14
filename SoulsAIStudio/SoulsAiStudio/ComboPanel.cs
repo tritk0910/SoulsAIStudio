@@ -62,6 +62,9 @@ namespace SoulsAiStudio.App
             ImGui.SetWindowFocus(WindowName);
         }
 
+        /// <summary>Shows the Manual tab next time the window is drawn (without focusing it).</summary>
+        public void SelectManualTab() => _selectManual = true;
+
         /// <returns>True when the window has focus.</returns>
         public bool Build()
         {
@@ -78,7 +81,8 @@ namespace SoulsAiStudio.App
                 Refresh();
                 if (ImGui.BeginTabBar("##sas_combo_tabs"))
                 {
-                    if (ImGui.BeginTabItem("From Lua")) { BuildContents(); ImGui.EndTabItem(); }
+                    // Animations-only project: no Lua to read combos from, only the Manual tab.
+                    if (_app.Project?.IsAnimationsOnly != true && ImGui.BeginTabItem("From Lua")) { BuildContents(); ImGui.EndTabItem(); }
                     if (BeginTabItem("Manual", _selectManual ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
                     {
                         _manual.Build();
@@ -132,7 +136,7 @@ namespace SoulsAiStudio.App
             if (_spEventsAnibnd != _app.Bridge.LoadedAnibnd) { _spEvents.Clear(); _spEventsAnibnd = _app.Bridge.LoadedAnibnd; }
             var path = BuildPath(_nodes, 0);
             bool loaded = _app.Bridge.LoadedAnibnd != null;
-            if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Scripts panel → Load model & anims).");
+            if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Project panel → Load model & anims, or click a character).");
 
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
             ImGui.SameLine();
@@ -366,7 +370,7 @@ namespace SoulsAiStudio.App
         {
             _manual.StopLooping();
             _plan = _app.Bridge.PlayCombo(path.Select(p => (p.Step.AnimId, p.Cut)).ToList());
-            if (_plan == null) _app.Notify("Load the character first (Scripts panel → Load model & anims).");
+            if (_plan == null) _app.Notify("Load the character first (Project panel → Load model & anims, or click a character).");
         }
 
         private void DrawNodes(IReadOnlyList<ComboNode> nodes, int depth, int level)

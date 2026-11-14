@@ -116,6 +116,7 @@ namespace DSAnimStudio.TaeEditor
 
             RedoStack.Clear();
             
+            if (UndoType == UndoTypes.Anim) SoulsAiStudio.App.SasHooks.BeforeAnimChange(MainScreen.Graph.AnimRef); // [SAS] remember the saved state (undo back to it clears *)
             newAction.PerformDo();
             UndoStack.Push(newAction);
             RecalculateStackSizeBytes();
@@ -130,10 +131,12 @@ namespace DSAnimStudio.TaeEditor
             if (RedoStack.Count > 0)
             {
                 var action = RedoStack.Pop();
+                SoulsAiStudio.App.SasHooks.BeforeAnimChange(MainScreen.Graph.AnimRef); // [SAS]
                 action.PerformDo();
                 //NotificationManager.PushNotification($"Redid '{action.ActionDescription}'.", showDuration: 1, fadeDuration: 0.25f);
                 UndoStack.Push(action);
                 MainScreen.Graph.AnimRef.SAFE_SetIsModified(true);
+                SoulsAiStudio.App.SasHooks.AfterAnimUndoRedo(MainScreen.Graph.AnimRef); // [SAS] back at the saved state → not modified (*)
                 MainScreen.Graph?.InputMan?.ResetAllDrag();
                 MainScreen.FixActionSelectionAfterUndoRedo();
                 MainScreen.FixAnimSelectionAfterUndoRedo();
@@ -157,10 +160,12 @@ namespace DSAnimStudio.TaeEditor
             if (UndoStack.Count > 0)
             {
                 var lastAction = UndoStack.Pop();
+                SoulsAiStudio.App.SasHooks.BeforeAnimChange(MainScreen.Graph.AnimRef); // [SAS]
                 lastAction.PerformUndo();
                 //NotificationManager.PushNotification($"Undid '{lastAction.ActionDescription}'.", showDuration: 1, fadeDuration: 0.25f);
                 RedoStack.Push(lastAction);
                 MainScreen.Graph.AnimRef.SAFE_SetIsModified(true);
+                SoulsAiStudio.App.SasHooks.AfterAnimUndoRedo(MainScreen.Graph.AnimRef); // [SAS] back at the saved state → not modified (*)
                 MainScreen.Graph?.InputMan?.ResetAllDrag();
                 MainScreen.FixActionSelectionAfterUndoRedo();
                 MainScreen.FixAnimSelectionAfterUndoRedo();

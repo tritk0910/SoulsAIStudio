@@ -34,6 +34,24 @@ namespace SoulsAiStudio.App
             catch (Exception ex) { App.ReportError("UI error", ex); }
         }
 
+        /// <summary>Undo-to-saved-state tracking for the Animations list's unsaved mark (see <see cref="AnimCleanTracker"/>).</summary>
+        public static readonly AnimCleanTracker AnimClean = new();
+
+        /// <summary>TaeUndoMan: right before a new per-anim action, an undo or a redo.</summary>
+        public static void BeforeAnimChange(DSAnimStudio.DSAProj.Animation? anim)
+        {
+            try { AnimClean.BeforeChange(anim); } catch (Exception ex) { App.ReportError("Undo tracking", ex); }
+        }
+
+        /// <summary>TaeUndoMan: after an undo/redo marked the anim modified.</summary>
+        public static void AfterAnimUndoRedo(DSAnimStudio.DSAProj.Animation? anim)
+        {
+            try { AnimClean.AfterUndoRedo(anim); } catch (Exception ex) { App.ReportError("Undo tracking", ex); }
+        }
+
+        /// <summary>DSAProj: all modified flags cleared (after a save).</summary>
+        public static void AllAnimsSaved() => AnimClean.Reset();
+
         /// <summary>Called from DSAS <c>Window.Update</c> right after <c>ImGui.Begin</c>: reports its dock node.</summary>
         public static void ReportWindowDock(string title, uint dockId) => App.Layout.ReportDock(title, dockId);
 

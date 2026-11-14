@@ -131,7 +131,7 @@ namespace SoulsAiStudio.App
                     if (focused && _keys.CtrlS) SaveActive();
                     BuildTabs();
                     if (_active != null) focused |= BuildActive(_active);
-                    else ImGui.TextDisabled("Open a script from the Scripts panel.");
+                    else ImGui.TextDisabled("Open a script from the Project panel.");
                 }
             }
             finally { ImGui.End(); } // keep ImGui's stack balanced even if a panel throws

@@ -1175,6 +1175,7 @@ namespace DSAnimStudio
                 tae.SAFE_ClearAllModified();
 
             _modifiedCategories.Clear();
+            SoulsAiStudio.App.SasHooks.AllAnimsSaved(); // [SAS] saved: undo-to-clean baselines are outdated
         }
         public void SAFE_ClearAllModified() => SAFE(INNER_ClearAllModified);
 

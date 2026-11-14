@@ -24,6 +24,7 @@ namespace SoulsAiStudio.App
         public SasLayout Layout { get; } = new();
         public DsasBridge Bridge { get; } = new();
         private bool _autoLoadCharacter;
+        private string? _autoLoadChrId;
         private bool _spaceWasDown;
         public SasProject? Project => Session?.Project;
 
@@ -92,11 +93,16 @@ namespace SoulsAiStudio.App
             Settings.Save();
             _start.IsOpen = false;
             _editor.CloseAll();
-            _scripts.IsOpen = _editor.IsOpen = true;
+            _scripts.IsOpen = true;
+            ApplyLayout(CurrentLayout);
 
             var reopen = project.Scripts.FirstOrDefault(s => s.Key == project.Ui.OpenScriptKey) ?? project.Scripts.FirstOrDefault();
             if (reopen != null) _editor.Open(reopen);
-            _autoLoadCharacter = reopen != null;
+            // Animations-only project (or a character was the last thing opened): load that character.
+            _autoLoadChrId = project.Characters.FirstOrDefault(c => c.ChrId == project.Ui.OpenCharacter)?.ChrId
+                             ?? (reopen == null ? project.Characters.FirstOrDefault()?.ChrId : null);
+            _autoLoadCharacter = reopen != null && _autoLoadChrId == null;
+            if (project.IsAnimationsOnly) _combo.SelectManualTab();
             Notify($"Opened project '{project.Name}'.");
         }
 
@@ -163,7 +169,14 @@ namespace SoulsAiStudio.App
                 {
                     _autoLoadCharacter = false;
                     var files = ResolveCharacter(s);
-                    if (files != null && !Bridge.IsLoaded(files)) LoadCharacter(s);
+                    if (files is { AnibndFromMod: true } && !Bridge.IsLoaded(files)) LoadCharacter(s);
+                }
+                if (_autoLoadChrId != null && DSAnimStudio.zzz_DocumentManager.CurrentDocument != null)
+                {
+                    string id = _autoLoadChrId;
+                    _autoLoadChrId = null;
+                    var files = ResolveCharacterId(id);
+                    if (files is { AnibndFromMod: true } && !Bridge.IsLoaded(files)) LoadCharacterId(id);
                 }
                 Layout.ApplyIfNeeded(Settings);
                 if (Layout.FocusEditorTabFrames > 0) { ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
@@ -201,7 +214,15 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
             ImGui.Separator();
-            if (ImGui.MenuItem("Scripts Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
+            if (ImGui.BeginMenu("Layout", Session != null))
+            {
+                if (ImGui.MenuItem("AI (Lua Editor)", "", CurrentLayout == WorkspaceLayout.Ai)) SetLayout(WorkspaceLayout.Ai);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor shown as a tab next to Graph.");
+                if (ImGui.MenuItem("Animation", "", CurrentLayout == WorkspaceLayout.Animation)) SetLayout(WorkspaceLayout.Animation);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor hidden so the Graph (TAE timeline) stays visible. Default for animations-only projects.");
+                ImGui.EndMenu();
+            }
+            if (ImGui.MenuItem("Project Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
@@ -227,7 +248,12 @@ namespace SoulsAiStudio.App
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("On: during a TAE Blend the character's movement mixes the previous and the new anim by blend weight.\n" +
                                  "Off (DSAS 5.0): movement follows only the new anim, so it can stop or jump when a blend starts.");
-            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) { _scripts.IsOpen = _editor.IsOpen = _combo.IsOpen = true; Layout.RequestApply(); }
+            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null))
+            {
+                _scripts.IsOpen = _combo.IsOpen = true;
+                ApplyLayout(CurrentLayout);
+                Layout.RequestApply();
+            }
             ImGui.EndMenu();
         }
 
@@ -256,7 +282,7 @@ namespace SoulsAiStudio.App
         {
             ImGui.Separator();
             ImGui.TextDisabled("Souls AI");
-            if (ImGui.MenuItem("Scripts", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
+            if (ImGui.MenuItem("Project", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
         }
@@ -279,10 +305,122 @@ namespace SoulsAiStudio.App
             SaveProjectUiState();
         }
 
+        // ---------- layout (AI / Animation) ----------
+
+        /// <summary>Saved per project; animations-only projects default to <see cref="WorkspaceLayout.Animation"/>.</summary>
+        public WorkspaceLayout CurrentLayout =>
+            Project?.Ui.Layout ?? (Project?.IsAnimationsOnly == true ? WorkspaceLayout.Animation : WorkspaceLayout.Ai);
+
+        public void SetLayout(WorkspaceLayout layout)
+        {
+            if (Project == null) return;
+            Project.Ui.Layout = layout;
+            ApplyLayout(layout);
+            SaveProjectUiState();
+        }
+
+        /// <summary>Animation: Lua Editor closed, so the Graph it shares a dock node with stays visible. AI: editor shown in front.</summary>
+        private void ApplyLayout(WorkspaceLayout layout)
+        {
+            _editor.IsOpen = layout == WorkspaceLayout.Ai;
+            if (layout == WorkspaceLayout.Ai) Layout.FocusEditorTabFrames = 10;
+            else Layout.FocusEditorTabFrames = 0;
+        }
+
+        /// <summary>Opens an AI script in the editor (switches to the AI layout if the editor was hidden).</summary>
+        public void OpenScript(ProjectScript script)
+        {
+            _editor.Open(script);
+            if (!_editor.IsOpen) SetLayout(WorkspaceLayout.Ai);
+        }
+
+        // ---------- characters of animations-only projects ----------
+
+        private CharacterLocator? Locator => Project == null ? null : new CharacterLocator(Project.GameDir, Project.ModDir);
+
+        public CharacterFiles? ResolveCharacterId(string chrId) => Locator?.ResolveId(chrId);
+
+        /// <summary>Loads a project character's model + animations into DSAS.</summary>
+        public void LoadCharacterId(string chrId)
+        {
+            if (Project == null) return;
+            var files = ResolveCharacterId(chrId);
+            if (files == null) { Notify($"{chrId}.anibnd.dcx not found in the mod or the game chr folder."); return; }
+            if (!files.AnibndFromMod) { NotifyGameOnly(files.ChrId); return; }
+            if (Bridge.IsLoaded(files)) return; // already the current document
+            try
+            {
+                Bridge.LoadCharacter(files, Project.GameDir, Project.ModDir, chr =>
+                {
+                    Notify($"Loaded {chr}.");
+                    if (_editor.IsOpen) Layout.FocusEditorTabFrames = 30;
+                });
+                Notify($"Loading {files.ChrId}...");
+                if (Project.Ui.OpenCharacter != files.ChrId) { Project.Ui.OpenCharacter = files.ChrId; SaveProjectUiState(); }
+            }
+            catch (Exception ex) { ReportError($"Could not load {files.ChrId}", ex); }
+        }
+
+        /// <returns>Null on success, else the reason shown under the Add field.</returns>
+        public string? AddCharacter(string input)
+        {
+            if (Project == null) return "No project open.";
+            string? id = CharacterLocator.NormalizeChrId(input);
+            if (id == null) return "Use a character id like c5060.";
+            if (Project.Characters.Any(c => c.ChrId == id)) return $"{id} is already in the list.";
+            if (ResolveCharacterId(id) is not { } files) return $"{id}.anibnd.dcx is not in the mod or the game chr folder.";
+            if (new FileInfo(files.AnibndPath).Length < CharacterLocator.StubAnibndBytes)
+                return $"{id} is a stub without animations of its own (variant chrs use their base chr, e.g. c5063 → c5060).";
+            Project.Characters.Add(new ProjectCharacter { ChrId = id });
+            SaveProjectUiState();
+            return null;
+        }
+
+        public void RemoveCharacter(string chrId)
+        {
+            if (Project == null) return;
+            Project.Characters.RemoveAll(c => c.ChrId == chrId);
+            if (Project.Ui.OpenCharacter == chrId) Project.Ui.OpenCharacter = null;
+            SaveProjectUiState();
+        }
+
+        public void RenameCharacter(string chrId, string name)
+        {
+            var c = Project?.Characters.FirstOrDefault(x => x.ChrId == chrId);
+            if (c == null) return;
+            c.DisplayName = name.Trim();
+            SaveProjectUiState();
+        }
+
+        /// <summary>Copies a game-only anibnd into the mod's chr folder (game file untouched) and loads the copy.</summary>
+        public void CopyCharacterToMod(string chrId)
+        {
+            if (Locator is not { } loc) return;
+            try
+            {
+                string path = loc.CopyAnibndToMod(chrId);
+                Notify($"Copied {chrId}.anibnd.dcx into the mod: {path}");
+                LoadCharacterId(chrId);
+            }
+            catch (Exception ex) { ReportError($"Could not copy {chrId} into the mod", ex); }
+        }
+
+        /// <summary>
+        /// Game-folder anibnds are not opened: DSAS writes workspace/project files next to the file it opens, and the game
+        /// folder must never be written to. The user copies it into the mod first.
+        /// </summary>
+        private void NotifyGameOnly(string chrId) =>
+            DSAnimStudio.ImguiOSD.DialogManager.DialogOK("Copy to mod first",
+                $"{chrId}.anibnd.dcx only exists in the game folder. Souls AI Studio never writes into the game folder, and\n" +
+                "opening a file there makes DS Anim Studio create its workspace files next to it.\n\n" +
+                $"Click \"Copy to mod\" next to {chrId} in the Project panel: it copies the anibnd into your mod's chr folder\n" +
+                "(the game file stays untouched) and opens that copy.");
+
         public void LoadCharacter(ProjectScript script)
         {
             var files = ResolveCharacter(script);
             if (files == null || Project == null) { Notify($"No anibnd found for {script.FileName}. Set the Character (e.g. c5060)."); return; }
+            if (!files.AnibndFromMod) { NotifyGameOnly(files.ChrId); return; }
             try
             {
                 Bridge.LoadCharacter(files, Project.GameDir, Project.ModDir, chr =>
@@ -298,7 +436,7 @@ namespace SoulsAiStudio.App
         public void PlayAnim(int animId)
         {
             if (!Bridge.GotoAnim(animId))
-                Notify($"Anim {animId} not found — load the character first (Scripts panel → Load model & anims).");
+                Notify($"Anim {animId} not found — load the character first (Project panel → Load model & anims, or click a character).");
         }
 
         // ---------- safety for DSAS writes ----------
