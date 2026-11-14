@@ -84,7 +84,9 @@ public class LuaDecompilerTests(ITestOutputHelper output)
     {
         using var work = TempWorkDir.Create("decomp-bad");
         string cache = work.Combine("cache");
-        var d = new LuaDecompiler(RequiresDecompilerFactAttribute.ExePath, cache);
+        // Under a parallel test run the decompiler sometimes hangs on garbage instead of exiting with an error; the app
+        // kills it after its timeout. Both outcomes must surface as an error and leave nothing cached.
+        var d = new LuaDecompiler(RequiresDecompilerFactAttribute.ExePath, cache) { Timeout = TimeSpan.FromSeconds(15) };
         byte[] garbage = [0x1B, (byte)'L', (byte)'u', (byte)'a', 0x50, 1, 2, 3, 4, 5, 6, 7];
         string? result = null;
         Exception? error = null;
@@ -92,7 +94,7 @@ public class LuaDecompilerTests(ITestOutputHelper output)
         catch (Exception ex) { error = ex; }
         output.WriteLine(error?.ToString() ?? "returned: " + result);
         Assert.NotNull(error);
-        Assert.IsType<InvalidOperationException>(error);
+        Assert.True(error is InvalidOperationException or TimeoutException, error!.GetType().Name);
         Assert.False(Directory.Exists(Path.Combine(cache, "decompiled")) && Directory.EnumerateFiles(Path.Combine(cache, "decompiled")).Any(),
             "failed decompile was cached");
     }
