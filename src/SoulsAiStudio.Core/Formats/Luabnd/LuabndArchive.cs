@@ -6,12 +6,13 @@ namespace SoulsAiStudio.Core.Formats.Luabnd;
 /// <summary>One file inside a luabnd (a Lua script, or the <c>.luagnl</c>/<c>.luainfo</c> tables).</summary>
 public sealed class LuabndEntry
 {
-    internal LuabndEntry(int id, Binder.FileFlags flags, string relativePath, byte[] bytes)
+    internal LuabndEntry(int id, Binder.FileFlags flags, string relativePath, byte[] bytes, string? diskPath = null)
     {
         Id = id;
         Flags = flags;
         RelativePath = relativePath;
         Bytes = bytes;
+        DiskPath = diskPath ?? relativePath;
     }
 
     public int Id { get; }
@@ -19,6 +20,12 @@ public sealed class LuabndEntry
 
     /// <summary>Path relative to the archive root, backslash-separated, e.g. <c>out\bin\506300_battle.lua</c>.</summary>
     public string RelativePath { get; }
+
+    /// <summary>
+    /// Path of this file inside the unpacked folder, backslash-separated. Same as <see cref="RelativePath"/> for WitchyBND;
+    /// Yabber folders keep more of the original path (e.g. <c>NTC\...\script\ai\out\bin\x.lua</c>).
+    /// </summary>
+    public string DiskPath { get; }
 
     public string FileName => RelativePath[(RelativePath.LastIndexOf('\\') + 1)..];
     public byte[] Bytes { get; private set; }
@@ -83,15 +90,50 @@ public sealed class LuabndArchive
         return new LuabndArchive(header, entries);
     }
 
-    /// <summary>Reads a WitchyBND-unpacked folder (the one containing <c>_witchy-bnd4.xml</c>).</summary>
+    /// <summary>
+    /// Reads an unpacked folder: WitchyBND (<c>_witchy-bnd4.xml</c>) or Yabber (<c>_yabber-bnd4.xml</c>). Entry names
+    /// are rebuilt exactly as the tool would repack them (root + path), so either folder repacks to the same archive.
+    /// </summary>
     public static LuabndArchive LoadUnpacked(string folder)
     {
-        var m = WitchyBnd4Manifest.Load(Path.Combine(folder, WitchyBnd4Manifest.FileName));
+        string manifestPath = WitchyBnd4Manifest.FindIn(folder)
+            ?? throw new FileNotFoundException($"'{folder}' has no {WitchyBnd4Manifest.FileName} or {WitchyBnd4Manifest.YabberFileName}.");
+        var m = WitchyBnd4Manifest.Load(manifestPath);
+        if (m.Files.FirstOrDefault(f => Path.IsPathRooted(f.Path) || f.Path.Split('\\', '/').Contains("..")) is { } bad)
+            throw new FormatException($"{manifestPath}: file path '{bad.Path}' points outside the folder.");
+        var names = m.Files.Select(m.BndName).ToList();
+        string root = m.Files.Any(f => f.Root != null) ? CommonRoot(names) : m.Root;
         var header = new LuabndHeader(m.Version, m.Format, m.BigEndian, m.BitBigEndian, m.Unicode,
-            m.Extended, m.Unk04, m.Unk05, m.Compression, m.Root);
-        var entries = m.Files.Select(e => new LuabndEntry(e.Id, e.Flags, e.Path,
-            File.ReadAllBytes(Path.Combine(folder, ToDiskPath(e.Path))))).ToList();
-        return new LuabndArchive(header, entries);
+            m.Extended, m.Unk04, m.Unk05, m.Compression, root);
+        var entries = m.Files.Select((e, i) => new LuabndEntry(e.Id, e.Flags, StripRoot(names[i], root),
+            File.ReadAllBytes(Path.Combine(folder, ToDiskPath(e.Path))), e.Path)).ToList();
+        return new LuabndArchive(header, entries) { UnpackedFormat = m.Kind };
+    }
+
+    /// <summary>Tool format of the folder this archive was loaded from (null = loaded from a packed file).</summary>
+    public UnpackFormat? UnpackedFormat { get; private init; }
+
+    /// <summary>
+    /// Unpacks into <paramref name="folder"/> the way WitchyBND does: every entry under its relative path plus a
+    /// <c>_witchy-bnd4.xml</c>, so WitchyBND (and this app) can repack it. Returns the files written.
+    /// </summary>
+    public IReadOnlyList<string> UnpackTo(string folder, string packedFileName)
+    {
+        var written = new List<string>();
+        foreach (LuabndEntry e in _entries)
+        {
+            string disk = Path.Combine(folder, ToDiskPath(e.RelativePath));
+            Directory.CreateDirectory(Path.GetDirectoryName(disk)!);
+            AtomicFile.WriteAllBytes(disk, e.Bytes);
+            written.Add(disk);
+        }
+        var manifest = new WitchyBnd4Manifest(packedFileName, Header.Compression, Header.Root, Header.Version, Header.Format,
+            Header.BigEndian, Header.BitBigEndian, Header.Unicode, Header.Extended, Header.Unk04, Header.Unk05,
+            _entries.Select(e => new WitchyBnd4Manifest.Entry(e.Flags, e.Id, e.RelativePath)).ToList());
+        string xml = Path.Combine(folder, WitchyBnd4Manifest.FileName);
+        manifest.SaveWitchy(xml);
+        written.Add(xml);
+        return written;
     }
 
     /// <summary>Serializes to packed bytes using the archive's own compression.</summary>
@@ -130,7 +172,7 @@ public sealed class LuabndArchive
         var written = new List<string>();
         foreach (LuabndEntry e in _entries.Where(e => e.IsModified))
         {
-            string disk = Path.Combine(folder, ToDiskPath(e.RelativePath));
+            string disk = Path.Combine(folder, ToDiskPath(e.DiskPath));
             AtomicFile.WriteAllBytes(disk, e.Bytes);
             written.Add(disk);
             e.MarkSaved();

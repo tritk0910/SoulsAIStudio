@@ -6,7 +6,7 @@ namespace SoulsAiStudio.Core.Project;
 /// <summary>Where a luabnd's current content lives. Mod sources win over the game.</summary>
 public enum LuabndSource
 {
-    /// <summary><c>mods\X\script\&lt;name&gt;-luabnd-dcx\</c> (WitchyBND-unpacked; the user's working copy).</summary>
+    /// <summary><c>mods\X\script\&lt;name&gt;-luabnd-dcx\</c> (WitchyBND- or Yabber-unpacked; the user's working copy).</summary>
     ModUnpacked,
     /// <summary><c>mods\X\script\&lt;name&gt;.luabnd.dcx</c>.</summary>
     ModPacked,
@@ -44,7 +44,7 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
 
     public LuabndSource? Locate(string luabnd)
     {
-        if (File.Exists(Path.Combine(ModUnpackedDir(luabnd), WitchyBnd4Manifest.FileName))) return LuabndSource.ModUnpacked;
+        if (WitchyBnd4Manifest.FindIn(ModUnpackedDir(luabnd)) != null) return LuabndSource.ModUnpacked;
         if (File.Exists(ModPackedPath(luabnd))) return LuabndSource.ModPacked;
         if (File.Exists(GamePackedPath(luabnd))) return LuabndSource.Game;
         return null;
@@ -59,10 +59,31 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
             foreach (string f in Directory.EnumerateFiles(dir, "*.luabnd.dcx"))
                 names.Add(Path.GetFileName(f)[..^".luabnd.dcx".Length]);
             foreach (string d in Directory.EnumerateDirectories(dir, "*-luabnd-dcx"))
-                if (File.Exists(Path.Combine(d, WitchyBnd4Manifest.FileName)))
+                if (WitchyBnd4Manifest.FindIn(d) != null)
                     names.Add(Path.GetFileName(d)[..^"-luabnd-dcx".Length]);
         }
         return names.ToList();
+    }
+
+    /// <summary>Where a luabnd exists and whether the mod's unpacked folder has changes the .dcx doesn't (yet).</summary>
+    public LuabndStatus Status(string luabnd)
+    {
+        string packed = ModPackedPath(luabnd), dir = ModUnpackedDir(luabnd);
+        DateTime? packedTime = File.Exists(packed) ? File.GetLastWriteTimeUtc(packed) : null;
+        UnpackFormat? format = null;
+        DateTime? newest = null;
+        if (WitchyBnd4Manifest.FindIn(dir) is { } manifest)
+        {
+            format = manifest.EndsWith(WitchyBnd4Manifest.YabberFileName, StringComparison.OrdinalIgnoreCase) ? UnpackFormat.Yabber : UnpackFormat.Witchy;
+            try
+            {
+                newest = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+                    .Where(f => !f.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+                    .Select(File.GetLastWriteTimeUtc).DefaultIfEmpty(File.GetLastWriteTimeUtc(manifest)).Max();
+            }
+            catch (IOException) { }
+        }
+        return new LuabndStatus(luabnd, packedTime, format, newest, File.Exists(GamePackedPath(luabnd)));
     }
 
     public LuabndArchive Open(string luabnd) => Locate(luabnd) switch
@@ -95,7 +116,7 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
         {
             LuabndEntry? p = packed.Find(e.RelativePath);
             if (p == null || p.Bytes.AsSpan().SequenceEqual(e.Bytes)) continue;
-            string file = Path.Combine(dir, e.RelativePath.Replace('\\', Path.DirectorySeparatorChar));
+            string file = Path.Combine(dir, e.DiskPath.Replace('\\', Path.DirectorySeparatorChar));
             if (File.GetLastWriteTimeUtc(file) < packedTime) e.AdoptNewerBytes(p.Bytes);
         }
         return archive;
@@ -123,4 +144,16 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
         }
         return (scripts, errors);
     }
+}
+
+/// <param name="ModPackedTime">Last write of the mod's <c>.luabnd.dcx</c> (UTC), null if the mod has none.</param>
+/// <param name="Unpacked">Format of the mod's unpacked folder, null if there is none.</param>
+/// <param name="UnpackedNewest">Newest file in the unpacked folder (UTC).</param>
+public sealed record LuabndStatus(string Luabnd, DateTime? ModPackedTime, UnpackFormat? Unpacked, DateTime? UnpackedNewest, bool InGame)
+{
+    /// <summary>The unpacked folder was edited after the .dcx was written (or there is no .dcx yet): Repack needed.</summary>
+    public bool NeedsRepack => Unpacked != null && (ModPackedTime == null || UnpackedNewest > ModPackedTime.Value.AddSeconds(1));
+
+    /// <summary>The .dcx is newer than every unpacked file: repacking would undo those newer changes.</summary>
+    public bool PackedIsNewer => Unpacked != null && ModPackedTime != null && UnpackedNewest < ModPackedTime.Value.AddSeconds(-1);
 }

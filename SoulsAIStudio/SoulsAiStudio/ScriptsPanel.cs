@@ -53,7 +53,12 @@ namespace SoulsAiStudio.App
                     {
                         bool active = _editor.ActiveScript?.Key == s.Key;
                         if (ImGui.Selectable($"{s.Label}##{s.Key}", active)) _app.OpenScript(s);
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{s.Luabnd} / {s.EntryPath}");
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{s.Luabnd} / {s.EntryPath}\nRight-click: unpack / repack {s.Luabnd}");
+                        if (ImGui.BeginPopupContextItem($"##sas_script_ctx_{s.Key}"))
+                        {
+                            if (ImGui.MenuItem($"Unpack / Repack {s.Luabnd}...")) _app.OpenLuabndTools();
+                            ImGui.EndPopup();
+                        }
                     }
 
                     if (_editor.ActiveScript is { } script) BuildCharacter(script);

@@ -109,14 +109,14 @@ public sealed class ProjectSession
         string luabnd = script.Luabnd;
         string unpackedDir = Catalog.ModUnpackedDir(luabnd);
         string packedPath = Catalog.ModPackedPath(luabnd);
-        string unpackedFile = Path.Combine(unpackedDir, script.EntryPath.Replace('\\', Path.DirectorySeparatorChar));
 
-        bool hasUnpacked = File.Exists(Path.Combine(unpackedDir, WitchyBnd4Manifest.FileName));
+        bool hasUnpacked = WitchyBnd4Manifest.FindIn(unpackedDir) != null; // Witchy or Yabber folder
         LuabndArchive archive = hasUnpacked ? Catalog.OpenModUnpackedMerged(luabnd)
             : File.Exists(packedPath) ? LuabndArchive.LoadPacked(packedPath)
             : LuabndArchive.LoadPacked(Catalog.GamePackedPath(luabnd)); // first save: copy from game
         LuabndEntry entry = archive.Find(script.EntryPath)
             ?? throw new FileNotFoundException($"'{script.EntryPath}' is not in {luabnd}.");
+        string unpackedFile = Path.Combine(unpackedDir, entry.DiskPath.Replace('\\', Path.DirectorySeparatorChar));
 
         var targets = hasUnpacked ? new List<string> { packedPath, unpackedFile } : new List<string> { packedPath };
         EnsureWritable(targets);
@@ -136,6 +136,76 @@ public sealed class ProjectSession
             return new SaveResult(written, $"The game file was saved, but the unpacked copy could not be updated: {ex.Message}");
         }
         return new SaveResult(written, null);
+    }
+
+    // ---------- unpack / repack (WitchyBND / Yabber folders) ----------
+
+    /// <summary>
+    /// Repacks the mod's unpacked folder (<c>script\&lt;name&gt;-luabnd-dcx\</c>, Witchy or Yabber manifest) into
+    /// <c>script\&lt;name&gt;.luabnd.dcx</c> in the mod, exactly as WitchyBND/Yabber would: the folder's content wins.
+    /// The old .dcx is backed up first. Returns the written path.
+    /// </summary>
+    public async Task<string> RepackAsync(string luabnd, CancellationToken ct = default)
+    {
+        SemaphoreSlim gate = LockFor(luabnd);
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                string dir = Catalog.ModUnpackedDir(luabnd);
+                if (WitchyBnd4Manifest.FindIn(dir) == null)
+                    throw new FileNotFoundException($"{luabnd} has no unpacked folder (with a Witchy or Yabber xml) in the mod.");
+                string packedPath = Catalog.ModPackedPath(luabnd);
+                LuabndArchive archive = LuabndArchive.LoadUnpacked(dir);
+                byte[] bytes = archive.ToPackedBytes(); // build before touching disk
+                EnsureWritable([packedPath]);
+                // Fail before taking a backup, not halfway through the write.
+                if (File.Exists(packedPath) && File.GetAttributes(packedPath).HasFlag(FileAttributes.ReadOnly))
+                    throw new ReadOnlyFileException(Path.GetFullPath(packedPath));
+                Backups.BackupBeforeSave([packedPath]);
+                AtomicFile.WriteAllBytes(packedPath, bytes);
+                // The .dcx now holds exactly the folder's content: give it the folder's newest time so the folder reads
+                // "in sync" (not ".dcx is newer"), and an older unpacked file never looks newer than this repack.
+                if (Catalog.Status(luabnd).UnpackedNewest is { } newest) File.SetLastWriteTimeUtc(packedPath, newest);
+                return packedPath;
+            }, ct);
+        }
+        finally { gate.Release(); }
+    }
+
+    /// <summary>
+    /// Unpacks <c>&lt;name&gt;.luabnd.dcx</c> (the mod's copy, else the game's) into the mod's
+    /// <c>script\&lt;name&gt;-luabnd-dcx\</c> in WitchyBND format. Refuses if that folder already has files.
+    /// Returns the folder.
+    /// </summary>
+    public async Task<string> UnpackAsync(string luabnd, CancellationToken ct = default)
+    {
+        SemaphoreSlim gate = LockFor(luabnd);
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                string dir = Catalog.ModUnpackedDir(luabnd);
+                if (Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any())
+                    throw new IOException($"{Path.GetFileName(dir)} already exists in the mod and is not empty; nothing was overwritten.");
+                string modPacked = Catalog.ModPackedPath(luabnd);
+                string source = File.Exists(modPacked) ? modPacked : Catalog.GamePackedPath(luabnd);
+                if (!File.Exists(source)) throw new FileNotFoundException($"{luabnd}.luabnd.dcx not found in the mod or the game.");
+                LuabndArchive archive = LuabndArchive.LoadPacked(source);
+                EnsureWritable([Path.Combine(dir, WitchyBnd4Manifest.FileName)]);
+                var files = archive.UnpackTo(dir, luabnd + ".luabnd.dcx");
+                if (source == modPacked)
+                {
+                    // Same content as the mod's .dcx: give the files its time so the folder doesn't look "changed → repack".
+                    DateTime t = File.GetLastWriteTimeUtc(modPacked);
+                    foreach (string f in files) File.SetLastWriteTimeUtc(f, t);
+                }
+                return dir;
+            }, ct);
+        }
+        finally { gate.Release(); }
     }
 
     private void EnsureWritable(IEnumerable<string> paths)

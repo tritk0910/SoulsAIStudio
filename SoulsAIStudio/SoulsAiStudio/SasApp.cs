@@ -33,6 +33,7 @@ namespace SoulsAiStudio.App
         private readonly ScriptsPanel _scripts;
         private readonly LuaEditorPanel _editor;
         private readonly ComboPanel _combo;
+        private readonly LuabndToolsPanel _luabnd;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -44,6 +45,7 @@ namespace SoulsAiStudio.App
             _editor = new LuaEditorPanel(this);
             _scripts = new ScriptsPanel(this, _editor);
             _combo = new ComboPanel(this, _editor);
+            _luabnd = new LuabndToolsPanel(this);
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             _lighting = new ViewportLightingStore(Settings);
             _lighting.Restore(); // the user's own Toolbox values win over the preset
@@ -183,6 +185,7 @@ namespace SoulsAiStudio.App
                 focused |= _scripts.Build();
                 focused |= _editor.Build();
                 focused |= _combo.Build();
+                focused |= _luabnd.Build();
             }
             SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
             BuildErrorPopup();
@@ -213,6 +216,10 @@ namespace SoulsAiStudio.App
             ImGui.Separator();
             if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
+            if (ImGui.MenuItem("Luabnd (Unpack / Repack)...", "", false, Session != null)) _luabnd.Open();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Unpack a map's .luabnd.dcx into a WitchyBND folder, or repack a Witchy/Yabber folder into the mod's .luabnd.dcx,\n" +
+                                 "without leaving the app. Saving in the Lua Editor already updates both; this is for edits made in other tools.");
             ImGui.Separator();
             if (ImGui.BeginMenu("Layout", Session != null))
             {
@@ -285,7 +292,14 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Project", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
+            if (ImGui.MenuItem("Luabnd (Unpack / Repack)", "", _luabnd.IsOpen, Session != null)) { if (_luabnd.IsOpen) _luabnd.IsOpen = false; else _luabnd.Open(); }
         }
+
+        /// <summary>Opens the Luabnd window (Project panel context menu).</summary>
+        public void OpenLuabndTools() => _luabnd.Open();
+
+        /// <summary>After a repack: reload open scripts of that luabnd. Returns the ones skipped because of unsaved edits.</summary>
+        public IReadOnlyList<string> ReloadScriptsOf(string luabnd) => _editor.ReloadLuabnd(luabnd);
 
         public void TrackSoundVolume(float volume)
         {

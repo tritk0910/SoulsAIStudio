@@ -26,6 +26,8 @@ namespace SoulsAiStudio.App
         public Task<ScriptDocument>? Loading;
         public ScriptDocument? Doc;
         public string? Error;
+        /// <summary>Cursor line to restore after a reload.</summary>
+        public int? RestoreLine;
         public bool IsDirty => Doc != null && Editor.IsDirty;
 
         // Analysis snapshot (built off the UI thread, debounced).
@@ -93,6 +95,23 @@ namespace SoulsAiStudio.App
         }
 
         public void JumpTo(int line) => _active?.Editor.GoToLine(line);
+
+        /// <summary>
+        /// Reloads open scripts of <paramref name="luabnd"/> from disk (after a repack/unpack changed it). Scripts with
+        /// unsaved edits are left alone; their names are returned.
+        /// </summary>
+        public IReadOnlyList<string> ReloadLuabnd(string luabnd)
+        {
+            var skipped = new List<string>();
+            foreach (var o in _open.Where(o => string.Equals(o.Script.Luabnd, luabnd, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (o.IsDirty || o.Saving != null) { skipped.Add(o.Script.FileName); continue; }
+                if (o.Loading != null) continue;
+                o.RestoreLine = o.Doc != null ? o.CursorLine : null;
+                o.Loading = _app.Session!.OpenAsync(o.Script);
+            }
+            return skipped;
+        }
 
         public void CloseAll()
         {
@@ -243,6 +262,7 @@ namespace SoulsAiStudio.App
                 {
                     o.Doc = load.Result;
                     o.Editor.Text = o.Doc.SavedText; // resets undo, marks clean
+                    if (o.RestoreLine is int line) { o.Editor.GoToLine(line); o.RestoreLine = null; }
                     o.LastEdit = DateTime.UtcNow - AnalysisDebounce; // analyze immediately
                 }
                 else o.Error = "Could not open: " + load.Exception?.GetBaseException().Message;
