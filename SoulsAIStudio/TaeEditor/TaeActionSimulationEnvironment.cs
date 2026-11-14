@@ -374,6 +374,7 @@ namespace DSAnimStudio.TaeEditor
                                 act.NewSimulationExit = (slotPrevTime <= endTime && slotTime > endTime) || (simulateOneshotActionsInReverse && (slotPrevTime > endTime && slotTime <= endTime));
                                 act.NewSimulationActive = (slotTime >= startTime && slotTime <= endTime) || act.NewSimulationEnter || act.NewSimulationExit;
                             }
+                            SoulsAiStudio.App.SasHooks.SoloSpEffectOnHover(this, act, soloHoverAction); // [SAS] hovering a block: only that SpEffect is listed (DSAS 4.9.9)
 
                             if (justStartedPlayback || playbackCursorStartedMovingForwardThisFrame)
                             {

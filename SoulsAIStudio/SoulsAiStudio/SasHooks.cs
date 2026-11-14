@@ -49,6 +49,32 @@ namespace SoulsAiStudio.App
             try { AnimClean.AfterUndoRedo(anim); } catch (Exception ex) { App.ReportError("Undo tracking", ex); }
         }
 
+        /// <summary>
+        /// DSAS 4.9.9 "solo on hover", for SpEffects only. While the mouse is over a TAE block (and nothing is playing or
+        /// scrubbing), SpEffect blocks are active only if they are the hovered block, whatever the time: hovering a SpEffect
+        /// lists just that SpEffect in the viewport; hovering any other block lists none. Not hovering: SpEffects active at
+        /// the current time, as before. Every other event type (attack/bullet hitboxes…) keeps the time-based rule.
+        /// Skipped when DSAS's own "Solo Highlight Action On Hover" (all types) is enabled.
+        /// </summary>
+        public static void SoloSpEffectOnHover(DSAnimStudio.TaeEditor.TaeActionSimulationEnvironment sim, DSAnimStudio.DSAProj.Action act,
+            DSAnimStudio.DSAProj.Action? dsasSoloHover)
+        {
+            try
+            {
+                if (dsasSoloHover != null || act == null) return;
+                var screen = DSAnimStudio.Main.TAE_EDITOR;
+                var hover = screen?.NewHoverAction_NeedsNoSelection;
+                if (hover == null) return;
+                var cursor = screen!.PlaybackCursor;
+                if (cursor == null || cursor.IsPlaying || cursor.Scrubbing) return;
+                if (!sim.NewSimulation_EvCheck_SpEffects(act)) return;
+                act.NewSimulationEnter = false;
+                act.NewSimulationExit = false;
+                act.NewSimulationActive = ReferenceEquals(act, hover);
+            }
+            catch (Exception) { } // never break DSAS's simulation
+        }
+
         /// <summary>DSAProj: all modified flags cleared (after a save).</summary>
         public static void AllAnimsSaved() => AnimClean.Reset();
 
