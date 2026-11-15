@@ -16,9 +16,11 @@ namespace DSAnimStudio
         public class SpEffectParam : ParamData
         {
             public float GrabityRate = 1.0f;
+            public int SasCycleSpEffectId = -1; public float SasMotionInterval; // [SAS] Sekiro cycleOccurrenceSpEffectId / motionInterval (combo: SpEffect that fires every interval)
 
             public override void Read(BinaryReaderEx br)
             {
+                SoulsAiStudio.App.SasHooks.ReadSpEffectCycle(this, br); // [SAS]
                 if (zzz_DocumentManager.CurrentDocument.GameRoot.GameType == SoulsAssetPipeline.SoulsGames.DS1 || zzz_DocumentManager.CurrentDocument.GameRoot.GameType == SoulsAssetPipeline.SoulsGames.DS1R
                     || zzz_DocumentManager.CurrentDocument.GameRoot.GameType == SoulsAssetPipeline.SoulsGames.DES) //TODO_DES
                 {

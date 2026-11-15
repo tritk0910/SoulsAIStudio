@@ -123,6 +123,11 @@ namespace SoulsAiStudio.App
         {
             var o = _active;
             if (o?.Doc == null || o.Saving != null || !o.IsDirty) return;
+            if (_app.Project?.IsReadOnly == true)
+            {
+                _app.Notify("Read-only project (no mod folder): scripts can't be saved.");
+                return;
+            }
             o.SavingVersion = o.Editor.Version;
             o.SavingText = o.Editor.Text;
             o.Saving = _app.Session!.SaveAsync(o.Doc, o.SavingText);

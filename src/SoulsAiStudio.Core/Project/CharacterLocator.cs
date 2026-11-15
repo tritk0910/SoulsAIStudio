@@ -7,6 +7,8 @@ namespace SoulsAiStudio.Core.Project;
 public sealed record CharacterFiles(string ChrId, string AnibndPath, string? ChrbndPath)
 {
     public bool AnibndFromMod { get; init; }
+    /// <summary>A project-cache copy of a game anibnd, opened for viewing only (see <see cref="CharacterLocator.GameView"/>).</summary>
+    public bool IsReadOnlyView { get; init; }
 }
 
 /// <summary>A character found in the chr folders (mod first, then game).</summary>
@@ -24,13 +26,42 @@ public sealed class CharacterLocator(string gameDir, string modDir)
     /// <summary>Anibnds smaller than this are stubs (no animations of their own).</summary>
     public const long StubAnibndBytes = 4096;
 
+    /// <summary>False for a read-only project (no mod folder).</summary>
+    public bool HasMod { get; } = !string.IsNullOrWhiteSpace(modDir);
+
     public string? AnibndPath(string chrId) => FirstExisting(
-        Path.Combine(modDir, "chr", chrId + ".anibnd.dcx"),
+        HasMod ? Path.Combine(modDir, "chr", chrId + ".anibnd.dcx") : null,
         Path.Combine(gameDir, "chr", chrId + ".anibnd.dcx"));
 
     public string? ChrbndPath(string chrId) => FirstExisting(
-        Path.Combine(modDir, "chr", chrId + ".chrbnd.dcx"),
+        HasMod ? Path.Combine(modDir, "chr", chrId + ".chrbnd.dcx") : null,
         Path.Combine(gameDir, "chr", chrId + ".chrbnd.dcx"));
+
+    private bool IsInMod(string path) => HasMod && path.StartsWith(Path.GetFullPath(modDir), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Read-only view of a game anibnd: a copy under <paramref name="viewDir"/> (refreshed when the game file changes),
+    /// because DS Anim Studio writes its workspace/project files next to the anibnd it opens and the game folder is never
+    /// written to. Saving into the copy is refused by the app. The chrbnd is read from its own location.
+    /// </summary>
+    public CharacterFiles? GameView(string chrId, string viewDir)
+    {
+        string? id = NormalizeChrId(chrId);
+        if (id == null) return null;
+        string source = Path.Combine(gameDir, "chr", id + ".anibnd.dcx");
+        if (!File.Exists(source)) return null;
+        string copy = Path.Combine(viewDir, "chr", id + ".anibnd.dcx");
+        if (WritePolicy.WhyBlocked(copy, [gameDir]) is { } why) throw new InvalidOperationException(why);
+        var src = new FileInfo(source);
+        var dst = new FileInfo(copy);
+        if (!dst.Exists || dst.Length != src.Length || dst.LastWriteTimeUtc != src.LastWriteTimeUtc)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+            AtomicFile.WriteAllBytes(copy, File.ReadAllBytes(source));
+            File.SetLastWriteTimeUtc(copy, src.LastWriteTimeUtc);
+        }
+        return new CharacterFiles(id, copy, ChrbndPath(id)) { IsReadOnlyView = true };
+    }
 
     /// <summary>Candidate chr ids for a think/npc id like <c>506300</c>, best first.</summary>
     public static IEnumerable<string> Candidates(string npcId)
@@ -54,7 +85,7 @@ public sealed class CharacterLocator(string gameDir, string modDir)
             if (anibnd == null) continue;
             var files = new CharacterFiles(id, anibnd, ChrbndPath(id))
             {
-                AnibndFromMod = anibnd.StartsWith(Path.GetFullPath(modDir), StringComparison.OrdinalIgnoreCase),
+                AnibndFromMod = IsInMod(anibnd),
             };
             if (new FileInfo(anibnd).Length >= StubAnibndBytes && files.ChrbndPath != null) return files;
             stubFallback ??= files;
@@ -79,14 +110,14 @@ public sealed class CharacterLocator(string gameDir, string modDir)
         if (id == null || AnibndPath(id) is not { } anibnd) return null;
         return new CharacterFiles(id, anibnd, ChrbndPath(id))
         {
-            AnibndFromMod = anibnd.StartsWith(Path.GetFullPath(modDir), StringComparison.OrdinalIgnoreCase),
+            AnibndFromMod = IsInMod(anibnd),
         };
     }
 
     /// <summary>Every <c>cXXXX.anibnd.dcx</c> in the mod's and the game's <c>chr</c> folders, sorted by id.</summary>
     public IReadOnlyList<CharacterCandidate> Scan()
     {
-        var mod = AnibndIds(modDir);
+        var mod = HasMod ? AnibndIds(modDir) : new Dictionary<string, long>();
         var game = AnibndIds(gameDir);
         var result = new List<CharacterCandidate>();
         foreach (string id in mod.Keys.Union(game.Keys).OrderBy(x => x, StringComparer.Ordinal))
@@ -117,6 +148,7 @@ public sealed class CharacterLocator(string gameDir, string modDir)
     /// </summary>
     public string CopyAnibndToMod(string chrId)
     {
+        if (!HasMod) throw new InvalidOperationException("This project has no mod folder, so nothing can be copied into a mod.");
         string id = NormalizeChrId(chrId) ?? throw new ArgumentException($"'{chrId}' is not a character id like c5060.", nameof(chrId));
         string source = Path.Combine(gameDir, "chr", id + ".anibnd.dcx");
         string target = Path.Combine(modDir, "chr", id + ".anibnd.dcx");
@@ -128,5 +160,5 @@ public sealed class CharacterLocator(string gameDir, string modDir)
         return target;
     }
 
-    private static string? FirstExisting(params string[] paths) => paths.FirstOrDefault(File.Exists);
+    private static string? FirstExisting(params string?[] paths) => paths.FirstOrDefault(p => p != null && File.Exists(p));
 }

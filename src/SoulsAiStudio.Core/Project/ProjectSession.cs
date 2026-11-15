@@ -46,7 +46,7 @@ public sealed class ProjectSession
     {
         Project = project;
         Catalog = new ScriptCatalog(project.GameDir, project.ModDir);
-        Backups = new BackupService(project.BackupDir, project.ModDir);
+        Backups = new BackupService(project.BackupDir, project.IsReadOnly ? project.ProjectDir : project.ModDir);
         _decompiler = new LuaDecompiler(LuaDecompiler.ResolveExePath(project.DecompilerPath, decompilerExe), project.CacheDir);
     }
 
@@ -209,6 +209,8 @@ public sealed class ProjectSession
 
     private void EnsureWritable(IEnumerable<string> paths)
     {
+        if (Project.IsReadOnly)
+            throw new InvalidOperationException("This project has no mod folder (read-only): nothing can be saved. Create a project with a mod folder to edit.");
         string mod = Path.GetFullPath(Project.ModDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         foreach (string p in paths)
         {

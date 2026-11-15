@@ -52,7 +52,7 @@ namespace SoulsAiStudio.App
             _scanErrors.Clear();
             _validation = null;
             _open = true;
-            if (Directory.Exists(_gameDir) && Directory.Exists(_modDir)) { StartScan(); StartChrScan(); }
+            if (Directory.Exists(_gameDir)) { StartScan(); StartChrScan(); }
         }
 
         /// <returns>True when the window has focus.</returns>
@@ -85,7 +85,10 @@ namespace SoulsAiStudio.App
 
                 Step("1", "Folders");
                 FolderField("Sekiro folder", ref _gameDir, "The game install, unpacked with UXM (contains chr\\, script\\, param\\).");
-                FolderField("Mod folder", ref _modDir, "Your Mod Engine mod, e.g. Sekiro\\mods\\MyMod. Everything is saved here; game files are never touched.");
+                FolderField("Mod folder", ref _modDir, "Optional. Your Mod Engine mod, e.g. Sekiro\\mods\\MyMod. Everything is saved here; game files are never touched.\n" +
+                                                       "Leave it empty to only read the game's files (read-only project: nothing can be saved).");
+                if (string.IsNullOrWhiteSpace(_modDir))
+                    ImGui.TextColored(Theme.Warn, "No mod folder: read-only project. Game scripts and animations can be viewed, nothing can be saved.");
                 if (_animsOnly) BuildCharacterStep();
                 else
                 {
@@ -226,9 +229,9 @@ namespace SoulsAiStudio.App
         private void StartChrScan()
         {
             _validation = null;
-            if (!Directory.Exists(_gameDir) && !Directory.Exists(_modDir))
+            if (!Directory.Exists(_gameDir))
             {
-                _validation = "Pick the Sekiro folder and the mod folder first.";
+                _validation = "Pick the Sekiro folder first.";
                 return;
             }
             var locator = new CharacterLocator(_gameDir, _modDir);
@@ -250,9 +253,9 @@ namespace SoulsAiStudio.App
         private void StartScan()
         {
             _validation = null;
-            if (!Directory.Exists(_gameDir) || !Directory.Exists(_modDir))
+            if (!Directory.Exists(_gameDir) || (!string.IsNullOrWhiteSpace(_modDir) && !Directory.Exists(_modDir)))
             {
-                _validation = "Pick both the Sekiro folder and the mod folder first.";
+                _validation = "Pick the Sekiro folder (and the mod folder, if you use one) first.";
                 return;
             }
             OodleLoader.TryLoad(_gameDir);

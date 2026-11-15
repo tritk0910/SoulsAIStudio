@@ -34,6 +34,7 @@ namespace SoulsAiStudio.App
         private readonly LuaEditorPanel _editor;
         private readonly ComboPanel _combo;
         private readonly LuabndToolsPanel _luabnd;
+        private readonly EventFinderPanel _finder;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -46,6 +47,7 @@ namespace SoulsAiStudio.App
             _scripts = new ScriptsPanel(this, _editor);
             _combo = new ComboPanel(this, _editor);
             _luabnd = new LuabndToolsPanel(this);
+            _finder = new EventFinderPanel(this);
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             _lighting = new ViewportLightingStore(Settings);
             _lighting.Restore(); // the user's own Toolbox values win over the preset
@@ -91,7 +93,7 @@ namespace SoulsAiStudio.App
             Recent.Add(project.FilePath);
             Settings.LastProjectFolder = project.ProjectDir;
             Settings.LastGameDir = project.GameDir;
-            Settings.LastModDir = project.ModDir;
+            if (!project.IsReadOnly) Settings.LastModDir = project.ModDir;
             Settings.Save();
             _start.IsOpen = false;
             _editor.CloseAll();
@@ -171,14 +173,14 @@ namespace SoulsAiStudio.App
                 {
                     _autoLoadCharacter = false;
                     var files = ResolveCharacter(s);
-                    if (files is { AnibndFromMod: true } && !Bridge.IsLoaded(files)) LoadCharacter(s);
+                    if (files != null && !IsCharacterLoaded(files)) LoadCharacter(s);
                 }
                 if (_autoLoadChrId != null && DSAnimStudio.zzz_DocumentManager.CurrentDocument != null)
                 {
                     string id = _autoLoadChrId;
                     _autoLoadChrId = null;
                     var files = ResolveCharacterId(id);
-                    if (files is { AnibndFromMod: true } && !Bridge.IsLoaded(files)) LoadCharacterId(id);
+                    if (files != null && !IsCharacterLoaded(files)) LoadCharacterId(id);
                 }
                 Layout.ApplyIfNeeded(Settings);
                 if (Layout.FocusEditorTabFrames > 0) { ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
@@ -187,6 +189,7 @@ namespace SoulsAiStudio.App
                 focused |= _combo.Build();
                 focused |= _luabnd.Build();
             }
+            focused |= _finder.Build(); // works with any loaded character, project or not
             SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
             BuildErrorPopup();
             if (SasInputProbe.Enabled) (_probe ??= new SasInputProbe()).Draw(focused);
@@ -216,6 +219,8 @@ namespace SoulsAiStudio.App
             ImGui.Separator();
             if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
+            if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)...", "", false, Session != null)) _luabnd.Open();
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Unpack a map's .luabnd.dcx into a WitchyBND folder, or repack a Witchy/Yabber folder into the mod's .luabnd.dcx,\n" +
@@ -295,6 +300,14 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)", "", _luabnd.IsOpen, Session != null)) { if (_luabnd.IsOpen) _luabnd.IsOpen = false; else _luabnd.Open(); }
         }
 
+        /// <summary>Ctrl+F in the graph / Edit > Find: the Find Events window. False when no character is loaded (DSAS then does nothing).</summary>
+        public bool OpenEventFinder()
+        {
+            if (DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen != true) return false;
+            _finder.Open();
+            return true;
+        }
+
         /// <summary>Opens the Luabnd window (Project panel context menu).</summary>
         public void OpenLuabndTools() => _luabnd.Open();
 
@@ -354,19 +367,45 @@ namespace SoulsAiStudio.App
 
         public CharacterFiles? ResolveCharacterId(string chrId) => Locator?.ResolveId(chrId);
 
+        /// <summary>
+        /// Files DSAS actually opens: the mod's anibnd, or for a game-only character a read-only view copy in the
+        /// project's cache (DSAS writes workspace files next to what it opens; the game folder is never written to).
+        /// </summary>
+        private CharacterFiles? OpenableFiles(CharacterFiles files) =>
+            files.AnibndFromMod || Project == null ? files : Locator?.GameView(files.ChrId, Project.GameViewDir);
+
+        /// <summary>True if this character (its mod anibnd or its read-only view copy) is the current DSAS document.</summary>
+        public bool IsCharacterLoaded(CharacterFiles files)
+        {
+            if (files.AnibndFromMod || Project == null) return Bridge.IsLoaded(files);
+            string view = Path.Combine(Project.GameViewDir, "chr", files.ChrId + ".anibnd.dcx");
+            return Bridge.IsLoaded(files with { AnibndPath = view });
+        }
+
+        /// <summary>The loaded character is a read-only view of a game file (saving it is refused).</summary>
+        public bool LoadedIsReadOnlyView =>
+            Project != null && Bridge.LoadedAnibnd is { } p && IsUnder(p, Project.GameViewDir);
+
+        private static bool IsUnder(string path, string dir)
+        {
+            try { return Path.GetFullPath(path).StartsWith(Path.GetFullPath(dir).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase); }
+            catch (Exception) { return false; }
+        }
+
         /// <summary>Loads a project character's model + animations into DSAS.</summary>
         public void LoadCharacterId(string chrId)
         {
             if (Project == null) return;
             var files = ResolveCharacterId(chrId);
             if (files == null) { Notify($"{chrId}.anibnd.dcx not found in the mod or the game chr folder."); return; }
-            if (!files.AnibndFromMod) { NotifyGameOnly(files.ChrId); return; }
-            if (Bridge.IsLoaded(files)) return; // already the current document
+            if (IsCharacterLoaded(files)) return; // already the current document
             try
             {
+                bool view = !files.AnibndFromMod;
+                files = OpenableFiles(files) ?? throw new FileNotFoundException($"{chrId}.anibnd.dcx not found in the game chr folder.");
                 Bridge.LoadCharacter(files, Project.GameDir, Project.ModDir, chr =>
                 {
-                    Notify($"Loaded {chr}.");
+                    Notify(view ? $"Loaded {chr} from the game (read-only view{(Project.IsReadOnly ? "" : ": use Copy to mod to edit")})." : $"Loaded {chr}.");
                     if (_editor.IsOpen) Layout.FocusEditorTabFrames = 30;
                 });
                 Notify($"Loading {files.ChrId}...");
@@ -419,24 +458,13 @@ namespace SoulsAiStudio.App
             catch (Exception ex) { ReportError($"Could not copy {chrId} into the mod", ex); }
         }
 
-        /// <summary>
-        /// Game-folder anibnds are not opened: DSAS writes workspace/project files next to the file it opens, and the game
-        /// folder must never be written to. The user copies it into the mod first.
-        /// </summary>
-        private void NotifyGameOnly(string chrId) =>
-            DSAnimStudio.ImguiOSD.DialogManager.DialogOK("Copy to mod first",
-                $"{chrId}.anibnd.dcx only exists in the game folder. Souls AI Studio never writes into the game folder, and\n" +
-                "opening a file there makes DS Anim Studio create its workspace files next to it.\n\n" +
-                $"Click \"Copy to mod\" next to {chrId} in the Project panel: it copies the anibnd into your mod's chr folder\n" +
-                "(the game file stays untouched) and opens that copy.");
-
         public void LoadCharacter(ProjectScript script)
         {
             var files = ResolveCharacter(script);
             if (files == null || Project == null) { Notify($"No anibnd found for {script.FileName}. Set the Character (e.g. c5060)."); return; }
-            if (!files.AnibndFromMod) { NotifyGameOnly(files.ChrId); return; }
             try
             {
+                files = OpenableFiles(files) ?? throw new FileNotFoundException($"{files.ChrId}.anibnd.dcx not found in the game chr folder.");
                 Bridge.LoadCharacter(files, Project.GameDir, Project.ModDir, chr =>
                 {
                     Notify($"Loaded {chr}.");
@@ -478,8 +506,13 @@ namespace SoulsAiStudio.App
         // ---------- safety for DSAS writes ----------
 
         /// <summary>Non-null reason when a write to <paramref name="path"/> must be refused (game folder, outside mods).</summary>
-        public string? WhyWriteIsBlocked(string path) =>
-            SoulsAiStudio.Core.IO.WritePolicy.WhyBlocked(path, new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() });
+        public string? WhyWriteIsBlocked(string path)
+        {
+            if (Project != null && IsUnder(path, Project.GameViewDir))
+                return "This character is a read-only view of the game's file, so it can't be saved." +
+                       (Project.IsReadOnly ? " This project has no mod folder." : " Use \"Copy to mod\" in the Project panel to edit a copy in your mod.");
+            return SoulsAiStudio.Core.IO.WritePolicy.WhyBlocked(path, new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() });
+        }
 
         /// <summary>Exit prompt for unsaved Lua (UI thread). True = OK to exit.</summary>
         public bool ConfirmExitWithUnsavedLua()

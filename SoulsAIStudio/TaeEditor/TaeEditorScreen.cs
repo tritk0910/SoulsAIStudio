@@ -3076,6 +3076,7 @@ namespace DSAnimStudio.TaeEditor
 
         public void ShowDialogFind()
         {
+            if (SoulsAiStudio.App.SasHooks.OpenEventFinder()) return; // [SAS] Ctrl+F / Edit > Find: simple "Find Events" window (DSAS Find under its Advanced button)
             if (NewFileContainerName == null || SelectedAnimCategory == null)
                 return;
 

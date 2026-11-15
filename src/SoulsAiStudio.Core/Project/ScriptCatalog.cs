@@ -36,16 +36,21 @@ public sealed record ScriptCandidate(string Luabnd, string EntryPath, LuabndSour
 public sealed class ScriptCatalog(string gameDir, string modDir)
 {
     public string GameScriptDir => Path.Combine(gameDir, "script");
-    public string ModScriptDir => Path.Combine(modDir, "script");
+    /// <summary>False for a read-only project (no mod folder): only the game is read.</summary>
+    public bool HasMod { get; } = !string.IsNullOrWhiteSpace(modDir);
+    public string ModScriptDir => HasMod ? Path.Combine(modDir, "script") : "";
 
-    public string ModUnpackedDir(string luabnd) => Path.Combine(ModScriptDir, luabnd + "-luabnd-dcx");
-    public string ModPackedPath(string luabnd) => Path.Combine(ModScriptDir, luabnd + ".luabnd.dcx");
+    public string ModUnpackedDir(string luabnd) => Path.Combine(RequireMod(), luabnd + "-luabnd-dcx");
+    public string ModPackedPath(string luabnd) => Path.Combine(RequireMod(), luabnd + ".luabnd.dcx");
+
+    private string RequireMod() => HasMod ? ModScriptDir
+        : throw new InvalidOperationException("This project has no mod folder (read-only): nothing can be saved, unpacked or repacked.");
     public string GamePackedPath(string luabnd) => Path.Combine(GameScriptDir, luabnd + ".luabnd.dcx");
 
     public LuabndSource? Locate(string luabnd)
     {
-        if (WitchyBnd4Manifest.FindIn(ModUnpackedDir(luabnd)) != null) return LuabndSource.ModUnpacked;
-        if (File.Exists(ModPackedPath(luabnd))) return LuabndSource.ModPacked;
+        if (HasMod && WitchyBnd4Manifest.FindIn(ModUnpackedDir(luabnd)) != null) return LuabndSource.ModUnpacked;
+        if (HasMod && File.Exists(ModPackedPath(luabnd))) return LuabndSource.ModPacked;
         if (File.Exists(GamePackedPath(luabnd))) return LuabndSource.Game;
         return null;
     }
@@ -54,7 +59,7 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
     public IReadOnlyList<string> ListLuabnds()
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string dir in new[] { GameScriptDir, ModScriptDir }.Where(Directory.Exists))
+        foreach (string dir in new[] { GameScriptDir, ModScriptDir }.Where(d => d.Length > 0 && Directory.Exists(d)))
         {
             foreach (string f in Directory.EnumerateFiles(dir, "*.luabnd.dcx"))
                 names.Add(Path.GetFileName(f)[..^".luabnd.dcx".Length]);
@@ -68,6 +73,7 @@ public sealed class ScriptCatalog(string gameDir, string modDir)
     /// <summary>Where a luabnd exists and whether the mod's unpacked folder has changes the .dcx doesn't (yet).</summary>
     public LuabndStatus Status(string luabnd)
     {
+        if (!HasMod) return new LuabndStatus(luabnd, null, null, null, File.Exists(GamePackedPath(luabnd)));
         string packed = ModPackedPath(luabnd), dir = ModUnpackedDir(luabnd);
         DateTime? packedTime = File.Exists(packed) ? File.GetLastWriteTimeUtc(packed) : null;
         UnpackFormat? format = null;

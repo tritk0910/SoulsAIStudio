@@ -738,6 +738,7 @@ namespace DSAnimStudio.ImguiOSD
                                                     animColor.Value, dpiScale: false);
                                             }
 
+                                            if (!selected && SoulsAiStudio.App.SasHooks.SharesHkxWithSelected(proj, Document.EditorScreen.SelectedAnim, anim)) ImGuiDebugDrawer.DrawRect(animNameTextPos + new NVector2(18 * Main.DPI, 1 + (2 * Main.DPI)), new NVector2(windowSize.X - scrollbarWidth - (18 * Main.DPI) - animNameTextPos.X, 17 * Main.DPI), new Color(70, 140, 255, 90), dpiScale: false); // [SAS] same HKX as the selected anim (DSAS 4.9.9)
                                             var animFileDispNameColor = Main.Config.Colors.GuiColorAnimListTextAnimFileName;
                                             var animFileDispNameShadowColor = Main.Config.Colors.GuiColorAnimListTextShadow;
 

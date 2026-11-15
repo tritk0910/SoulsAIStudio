@@ -89,6 +89,32 @@ namespace SoulsAiStudio.App
             catch (Exception) { return false; }
         }
 
+        /// <summary>
+        /// DSAS SpEffectParam row read (reader at the row start): for Sekiro also reads cycleOccurrenceSpEffectId and
+        /// motionInterval, so combos can follow e.g. TAE SpEffect 205032 → cycle SpEffect 5032 handled in Goal.Interrupt.
+        /// </summary>
+        public static void ReadSpEffectCycle(DSAnimStudio.ParamData.SpEffectParam row, SoulsFormats.BinaryReaderEx br)
+        {
+            try
+            {
+                if (DSAnimStudio.zzz_DocumentManager.CurrentDocument?.GameRoot?.GameType != SoulsAssetPipeline.SoulsGames.SDT) return;
+                long start = br.Position;
+                if (start + SoulsAiStudio.Core.Formats.Params.SekiroParamOffsets.SpEffectRowSize > br.Length) return;
+                row.SasCycleSpEffectId = br.GetInt32(start + SoulsAiStudio.Core.Formats.Params.SekiroParamOffsets.SpEffectCycleOccurrenceSpEffectId);
+                row.SasMotionInterval = br.GetSingle(start + SoulsAiStudio.Core.Formats.Params.SekiroParamOffsets.SpEffectMotionInterval);
+            }
+            catch (Exception) { } // never break DSAS's param load
+        }
+
+        private static readonly SameHkxIndex _sameHkx = new();
+
+        /// <summary>Animations list: <paramref name="anim"/> plays the same HKX as the selected anim (DSAS 4.9.9 highlight).</summary>
+        public static bool SharesHkxWithSelected(DSAnimStudio.DSAProj? proj, DSAnimStudio.DSAProj.Animation? selected, DSAnimStudio.DSAProj.Animation anim)
+        {
+            try { return _sameHkx.Shares(proj, selected, anim); }
+            catch (Exception) { return false; }
+        }
+
         /// <summary>DSAProj: all modified flags cleared (after a save).</summary>
         public static void AllAnimsSaved() => AnimClean.Reset();
 
@@ -235,6 +261,13 @@ namespace SoulsAiStudio.App
             if (why == null) return true;
             DSAnimStudio.ImguiOSD.DialogManager.DialogOK("Save blocked (Souls AI Studio)", why);
             return false;
+        }
+
+        /// <summary>DSAS ShowDialogFind (Ctrl+F in the graph, Edit > Find Value): true = our Find Events window opened instead.</summary>
+        public static bool OpenEventFinder()
+        {
+            try { return App.OpenEventFinder(); }
+            catch (Exception ex) { App.ReportError("Find Events", ex); return false; }
         }
 
         /// <summary>Called first in DSAS's FormClosing: true cancels the close (unsaved Lua and the user chose to stay).</summary>

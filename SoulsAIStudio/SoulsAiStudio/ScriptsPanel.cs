@@ -43,6 +43,13 @@ namespace SoulsAiStudio.App
                 ImGui.TextColored(Theme.Accent, project.Name);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{project.FilePath}\nMod: {project.ModDir}");
 
+                if (project.IsReadOnly)
+                {
+                    ImGui.TextColored(Theme.Warn, "Read-only project (no mod folder)");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Game files are only read: scripts, animations and luabnds can't be saved.\n" +
+                                         "To edit, create a project with a mod folder.");
+                }
                 LayoutSwitch();
 
                 if (project.Scripts.Count > 0)
@@ -109,7 +116,7 @@ namespace SoulsAiStudio.App
             foreach (var c in project.Characters)
             {
                 var files = _app.ResolveCharacterId(c.ChrId);
-                bool loaded = files != null && _app.Bridge.IsLoaded(files);
+                bool loaded = files != null && _app.IsCharacterLoaded(files);
                 if (files == null) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Dim);
                 if (ImGui.Selectable($"{c.Label}##sas_chr_{c.ChrId}", loaded, ImGuiSelectableFlags.AllowItemOverlap,
                         new Vector2(Math.Max(40, ImGui.GetContentRegionAvail().X - 96), 0)) && files != null)
@@ -128,12 +135,17 @@ namespace SoulsAiStudio.App
                 ImGui.SameLine(Math.Max(48, ImGui.GetContentRegionMax().X - 90));
                 if (files == null) ImGui.TextColored(Theme.Warn, "missing");
                 else if (files.AnibndFromMod) ImGui.TextColored(Theme.Ok, "mod");
+                else if (project.IsReadOnly)
+                {
+                    ImGui.TextDisabled("game (view)");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Read-only view of the game's file (a copy in the project cache is opened). Nothing can be saved.");
+                }
                 else
                 {
                     if (ImGui.SmallButton($"Copy to mod##sas_cp_{c.ChrId}")) _app.CopyCharacterToMod(c.ChrId);
                     if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip($"{c.ChrId} only exists in the game folder, which is never written to,\n" +
-                                         $"so its animations can't be saved. This copies chr\\{c.ChrId}.anibnd.dcx into the mod\n" +
+                        ImGui.SetTooltip($"{c.ChrId} only exists in the game folder, which is never written to: clicking it opens a\n" +
+                                         $"read-only view. To edit, this copies chr\\{c.ChrId}.anibnd.dcx into the mod\n" +
                                          "(the game file stays untouched) and loads the mod copy.");
                 }
                 if (_renameChr == c.ChrId)
@@ -193,54 +205,65 @@ namespace SoulsAiStudio.App
                 _app.SetCharacter(script, _chrEdit);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Leave empty to guess from the script id (e.g. 506300 → c5060). Enter to apply.");
             ImGui.SameLine();
-            bool loaded = files != null && _app.Bridge.IsLoaded(files);
+            bool loaded = files != null && _app.IsCharacterLoaded(files);
             if (files == null) ImGui.TextColored(Theme.Warn, "not found");
-            else if (!files.AnibndFromMod)
+            else
             {
-                if (ImGui.Button("Copy to mod##sas_chr_copy")) _app.CopyCharacterToMod(files.ChrId);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"{files.ChrId} only exists in the game folder, which is never written to (nor opened, since DS Anim Studio\n" +
-                                     "writes its workspace files next to what it opens). This copies the anibnd into the mod's chr folder and loads it.");
+                if (ImGui.Button(loaded ? "Reload##sas_chr_load" : files.AnibndFromMod ? "Load model & anims##sas_chr_load" : "View (read-only)##sas_chr_load"))
+                    _app.LoadCharacter(script);
+                if (!files.AnibndFromMod && ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"{files.ChrId} is only in the game folder: a read-only copy in the project cache is opened (nothing can be saved).");
+                if (!files.AnibndFromMod && !_app.Project!.IsReadOnly)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.Button("Copy to mod##sas_chr_copy")) _app.CopyCharacterToMod(files.ChrId);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip($"Copies {files.ChrId}.anibnd.dcx into the mod's chr folder (the game file stays untouched) and loads it, so its animations can be edited and saved.");
+                }
             }
-            else if (ImGui.Button(loaded ? "Reload##sas_chr_load" : "Load model & anims##sas_chr_load")) _app.LoadCharacter(script);
             AnimCategoryField(script);
             if (files != null)
             {
-                ImGui.TextDisabled($"{files.ChrId} ({(files.AnibndFromMod ? "mod" : "game")}){(loaded ? " – loaded" : "")}");
+                ImGui.TextDisabled($"{files.ChrId} ({(files.AnibndFromMod ? "mod" : "game, read-only")}){(loaded ? " – loaded" : "")}");
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(files.AnibndPath + "\n" + (files.ChrbndPath ?? "(no chrbnd)"));
             }
         }
 
-        private string _catEdit = "";
-        private string? _catEditKey;
-        private bool _catError;
-
         /// <summary>
-        /// Which TAE category the script's anim ids refer to (a000 by default). Isshin's spear phase (540310_battle.lua)
-        /// plays a100: 3000 in the Lua = a100_003000.
+        /// Which TAE category the script's anim ids refer to (a000 by default), picked from the categories of the loaded
+        /// character. Isshin's spear phase (540310_battle.lua) plays a100: 3000 in the Lua = a100_003000.
         /// </summary>
         private void AnimCategoryField(SoulsAiStudio.Core.Project.ProjectScript script)
         {
-            if (_catEditKey != script.Key) { _catEditKey = script.Key; _catEdit = $"a{script.AnimCategory:D3}"; _catError = false; }
             ImGui.Text("Anim category");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(70);
-            if (_catError) ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.45f, 0.15f, 0.15f, 1f));
-            bool enter = ImGui.InputTextWithHint("##sas_animcat", "a000", ref _catEdit, 8, ImGuiInputTextFlags.EnterReturnsTrue);
-            bool done = enter || ImGui.IsItemDeactivatedAfterEdit();
-            if (_catError) ImGui.PopStyleColor();
+            ImGui.SetNextItemWidth(170);
+            var cats = _app.Bridge.GetAnimCategories();
+            string current = $"a{script.AnimCategory:D3}";
+            var cur = cats.FirstOrDefault(c => c.Category == script.AnimCategory);
+            string preview = cats.Count == 0 ? current : cur.Count > 0 ? $"{current}  ({cur.Count} anims)" : $"{current}  (not in this character)";
+            if (ImGui.BeginCombo("##sas_animcat", preview))
+            {
+                try
+                {
+                    if (cats.Count == 0)
+                        ImGui.TextDisabled("Load the character to list its categories.");
+                    foreach (var (cat, count) in cats)
+                        if (ImGui.Selectable($"a{cat:D3}  ({count} anims)##sas_cat{cat}", cat == script.AnimCategory))
+                            _app.SetAnimCategory(script, cat);
+                    if (cats.Count > 0 && cats.All(c => c.Category != script.AnimCategory))
+                    {
+                        ImGui.Separator();
+                        ImGui.TextColored(Theme.Warn, $"{current} (saved) is not in the loaded character.");
+                    }
+                }
+                finally { ImGui.EndCombo(); }
+            }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("TAE category the anim ids in this script refer to. a000 (default): 3000 = a000_003000.\n" +
-                                 "Set a100 for e.g. Isshin's spear phase (540310_battle.lua): 3000 = a100_003000.\n" +
-                                 "Used by the ▶ buttons, the Combo player (From Lua) and \"→ Manual\". Enter to apply.");
-            if (!done) return;
-            if (AnimIds.ParseCategory(_catEdit) is int c)
-            {
-                _catError = false;
-                _app.SetAnimCategory(script, c);
-                _catEdit = $"a{c:D3}";
-            }
-            else _catError = true;
+                                 "Pick a100 for e.g. Isshin's spear phase (540310_battle.lua): 3000 = a100_003000.\n" +
+                                 "The list shows the categories of the loaded character.\n" +
+                                 "Used by the ▶ buttons, the Combo player (From Lua) and \"→ Manual\".");
         }
 
         private void BuildOutline()

@@ -39,6 +39,10 @@ public sealed class SasProject
     [JsonIgnore] public string ProjectDir => Path.GetDirectoryName(FilePath) ?? "";
     [JsonIgnore] public string BackupDir => Path.Combine(ProjectDir, "backups");
     [JsonIgnore] public string CacheDir => Path.Combine(ProjectDir, "cache");
+    /// <summary>No mod folder: game files can be read, nothing can be saved (scripts, anims, luabnds).</summary>
+    [JsonIgnore] public bool IsReadOnly => string.IsNullOrWhiteSpace(ModDir);
+    /// <summary>Copies of game anibnds opened for viewing (DSAS writes its workspace files next to what it opens).</summary>
+    [JsonIgnore] public string GameViewDir => Path.Combine(CacheDir, "gameview");
     /// <summary>No AI scripts: the project is for animation editing only (Lua editor hidden by default).</summary>
     [JsonIgnore] public bool IsAnimationsOnly => Scripts.Count == 0;
 

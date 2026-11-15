@@ -31,8 +31,9 @@ namespace SoulsAiStudio.App
         public void LoadCharacter(CharacterFiles files, string gameDir, string modDir, Action<string>? onLoaded = null)
         {
             // DSAS writes _DSAS_WORKSPACE.json / .dsaproj next to the anibnd it opens (and asks for a workspace), so an
-            // anibnd from the game folder would get files written into the game folder. Only mod copies are opened.
-            if (!files.AnibndFromMod)
+            // anibnd from the game folder would get files written into the game folder. Only mod files and read-only view
+            // copies (project cache) are opened.
+            if (!files.AnibndFromMod && !files.IsReadOnlyView)
                 throw new InvalidOperationException($"{files.ChrId} only exists in the game folder, which is never written to. " +
                                                     "Use \"Copy to mod\" (Project panel) to edit a copy in your mod.");
             // Already open in another DSAS document tab: switch to it instead of opening a duplicate.
@@ -112,6 +113,25 @@ namespace SoulsAiStudio.App
             if (doc.EditorScreen != null) doc.EditorScreen.SuppressNextModelOverridePrompt = true;
         }
 
+        /// <summary>TAE anim categories of the loaded character with their anim counts (a000 = 0, a100 = 100…), sorted.</summary>
+        public IReadOnlyList<(int Category, int Count)> GetAnimCategories()
+        {
+            try
+            {
+                var proj = zzz_DocumentManager.CurrentDocument?.EditorScreen?.Proj;
+                if (proj == null || zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen != true) return Array.Empty<(int, int)>();
+                var counts = new SortedDictionary<int, int>();
+                foreach (var c in proj.SAFE_GetAllAnimCategories())
+                {
+                    int n = 0;
+                    c.SafeAccessAnimations(list => n = list.Count(a => !a.IS_DUMMY_ANIM));
+                    counts[c.CategoryID] = (counts.TryGetValue(c.CategoryID, out int prev) ? prev : 0) + n;
+                }
+                return counts.Where(kv => kv.Value > 0).Select(kv => (kv.Key, kv.Value)).ToList();
+            }
+            catch (Exception) { return Array.Empty<(int, int)>(); }
+        }
+
         /// <summary>Selects animation <paramref name="animId"/> (e.g. 3002 → a000_003002) in DSAS's timeline/viewport.</summary>
         public bool GotoAnim(long animId)
         {
@@ -139,9 +159,50 @@ namespace SoulsAiStudio.App
         /// <summary>TAE event types that apply a SpEffect (param s32 at 0x0 = SpEffect id) — CLAUDE.md §4.3.</summary>
         private static readonly int[] SpEffectEventTypes = { 67, 66, 302, 401, 331, 797 };
 
-        /// <summary>SpEffect events in an anim's TAE: (SpEffect id, start frame, end frame), sorted by time. Empty if not loaded.</summary>
+        /// <summary>
+        /// A SpEffect that is active during part of an anim. <paramref name="ViaSpEffectId"/> is set when it is not in the TAE
+        /// itself but is the cycle SpEffect (SpEffectParam cycleOccurrenceSpEffectId) of TAE SpEffect ViaSpEffectId, which
+        /// applies it every <paramref name="Interval"/> seconds while active: its window then starts one interval later.
+        /// </summary>
+        public sealed record SpEffectEvent(int SpEffectId, float Frame, float EndFrame, int? ViaSpEffectId = null, float Interval = 0);
+
+        /// <summary>Max cycle depth followed (205032 → 5032 → …); also stops loops.</summary>
+        private const int MaxCycleDepth = 3;
+
+        /// <summary>SpEffect events in an anim's TAE plus their cycle SpEffects, sorted by start frame. Empty if not loaded.</summary>
+        public IReadOnlyList<SpEffectEvent> GetSpEffectEventsDetailed(int animId)
+        {
+            var tae = Events(animId, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0);
+            if (tae.Count == 0) return Array.Empty<SpEffectEvent>();
+            var result = new List<SpEffectEvent>(tae.Count);
+            try
+            {
+                var spParams = zzz_DocumentManager.CurrentDocument?.ParamManager?.SpEffectParam;
+                float snap = TaeExtensionMethods.GetCurrentSnapInterval();
+                foreach (var (id, frame, end) in tae)
+                {
+                    result.Add(new SpEffectEvent(id, frame, end));
+                    if (spParams == null) continue;
+                    var seen = new HashSet<int> { id };
+                    int cur = id;
+                    float start = frame;
+                    for (int depth = 0; depth < MaxCycleDepth; depth++)
+                    {
+                        if (!spParams.TryGetValue(cur, out var p) || p.SasCycleSpEffectId <= 0 || !seen.Add(p.SasCycleSpEffectId)) break;
+                        float interval = p.SasMotionInterval > 0 ? p.SasMotionInterval : 0;
+                        start = Math.Min(end, start + (snap > 0 ? interval / snap : 0));
+                        result.Add(new SpEffectEvent(p.SasCycleSpEffectId, start, end, id, interval));
+                        cur = p.SasCycleSpEffectId;
+                    }
+                }
+            }
+            catch (Exception) { }
+            return result.OrderBy(e => e.Frame).ToList();
+        }
+
+        /// <summary>SpEffect events (TAE + cycle SpEffects): (SpEffect id, start frame, end frame), sorted by time. Empty if not loaded.</summary>
         public IReadOnlyList<(int SpEffectId, float Frame, float EndFrame)> GetSpEffectEvents(int animId) =>
-            Events(animId, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0);
+            GetSpEffectEventsDetailed(animId).Select(e => (e.SpEffectId, e.Frame, e.EndFrame)).ToList();
 
         /// <summary>JumpTable flags in an anim's TAE: (flag, start frame), sorted by time. Empty if not loaded.</summary>
         public IReadOnlyList<(int Flag, float Frame)> GetJumpTableEvents(int animId) =>
@@ -217,7 +278,8 @@ namespace SoulsAiStudio.App
                 else if (req.ForcedCut is float fc) { end = fc; reason = req.ForcedReason ?? "forced cut"; }
                 else if (req.Cut.SpEffectId is int sp)
                 {
-                    var w = FirstWindow(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp);
+                    var w = FirstWindow(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp)
+                            ?? CycleWindow(req.AnimId, sp); // [cycle] SpEffect applied by a TAE SpEffect's SpEffectParam
                     if (w is not { } win) { reason = $"SpEffect {sp} not in TAE → anim end"; warn = true; }
                     else if (req.Cut.AtFrame is float at)
                     {
@@ -254,6 +316,14 @@ namespace SoulsAiStudio.App
                     && (best == null || act.StartTime / snap < best.Value.Start))
                     best = (act.StartTime / snap, act.EndTime / snap);
             return best;
+        }
+
+        /// <summary>Window of a cycle SpEffect (not in the TAE itself), see <see cref="GetSpEffectEventsDetailed"/>.</summary>
+        private (float Start, float End)? CycleWindow(int animId, int spEffectId)
+        {
+            foreach (var e in GetSpEffectEventsDetailed(animId))
+                if (e.SpEffectId == spEffectId && e.ViaSpEffectId != null) return (e.Frame, e.EndFrame);
+            return null;
         }
 
         private static float? FirstFrame(DSAProj.Animation taeAnim, float snap, Func<DSAProj.Action, bool> match, int value)

@@ -46,13 +46,17 @@ public static class WritePolicy
         return null;
     }
 
-    /// <summary>Checks a game/mod folder pair for a project. Returns problems (empty = valid).</summary>
+    /// <summary>
+    /// Checks a game/mod folder pair for a project. Returns problems (empty = valid). An empty mod folder is allowed:
+    /// the project is then read-only (game files can be read, nothing can be saved).
+    /// </summary>
     public static IReadOnlyList<string> ValidateFolders(string gameDir, string modDir)
     {
         var problems = new List<string>();
         if (string.IsNullOrWhiteSpace(gameDir) || !Path.IsPathRooted(gameDir)) problems.Add("Sekiro folder must be a full path.");
         else if (!Directory.Exists(gameDir)) problems.Add("Sekiro folder not found.");
-        if (string.IsNullOrWhiteSpace(modDir) || !Path.IsPathRooted(modDir)) { problems.Add("Mod folder must be a full path."); return problems; }
+        if (string.IsNullOrWhiteSpace(modDir)) return problems; // read-only project
+        if (!Path.IsPathRooted(modDir)) { problems.Add("Mod folder must be a full path."); return problems; }
         if (!Directory.Exists(modDir)) problems.Add("Mod folder not found.");
 
         string mod = WithSlash(Path.GetFullPath(modDir));

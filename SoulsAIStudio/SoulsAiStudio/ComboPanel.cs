@@ -24,7 +24,7 @@ namespace SoulsAiStudio.App
         private readonly Dictionary<int, int> _choice = new(); // branch line -> arm index
         private readonly Dictionary<(int Line, int Depth), int> _interrupt = new(); // step -> chosen SpEffect candidate (-1 none)
         private readonly Dictionary<(int Line, int Depth), float> _trigger = new(); // step -> chosen trigger frame inside the SpEffect window
-        private readonly Dictionary<int, IReadOnlyList<(int SpEffectId, float Frame, float EndFrame)>> _spEvents = new(); // anim -> TAE SpEffects
+        private readonly Dictionary<int, IReadOnlyList<DsasBridge.SpEffectEvent>> _spEvents = new(); // anim -> TAE SpEffects + their cycle SpEffects
         private string? _spEventsAnibnd;
         private SpEffectInterrupts.Table? _handlers;
         private const int MaxInterruptDepth = 6;
@@ -274,22 +274,26 @@ namespace SoulsAiStudio.App
             return result;
         }
 
-        private IReadOnlyList<(int SpEffectId, float Frame, float EndFrame, SpEffectHandler Handler)> Candidates(int animId)
+        private IReadOnlyList<(int SpEffectId, float Frame, float EndFrame, SpEffectHandler Handler, string Via)> Candidates(int animId)
         {
-            if (_handlers == null) return Array.Empty<(int, float, float, SpEffectHandler)>();
+            if (_handlers == null) return Array.Empty<(int, float, float, SpEffectHandler, string)>();
             var events = SpEvents(animId);
-            var result = new List<(int, float, float, SpEffectHandler)>();
+            var result = new List<(int, float, float, SpEffectHandler, string)>();
             foreach (var e in events)
                 if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
-                    result.Add((e.SpEffectId, e.Frame, e.EndFrame, h));
+                    result.Add((e.SpEffectId, e.Frame, e.EndFrame, h, ViaText(e)));
             return result;
         }
 
+        /// <summary>" (cycle of TAE SpEffect 205032, every 0.5 s)" for cycle SpEffects, else "".</summary>
+        private static string ViaText(DsasBridge.SpEffectEvent e) =>
+            e.ViaSpEffectId is int via ? $" (cycle of TAE SpEffect {via}{(e.Interval > 0 ? $", every {e.Interval:0.##} s" : "")})" : "";
+
         /// <summary>TAE SpEffect events of an anim. Empty results are not cached: the anibnd may still be loading.</summary>
-        private IReadOnlyList<(int SpEffectId, float Frame, float EndFrame)> SpEvents(int animId)
+        private IReadOnlyList<DsasBridge.SpEffectEvent> SpEvents(int animId)
         {
             if (_spEvents.TryGetValue(animId, out var events)) return events;
-            events = _app.Bridge.GetSpEffectEvents(_app.TaeAnimId(animId));
+            events = _app.Bridge.GetSpEffectEventsDetailed(_app.TaeAnimId(animId));
             if (events.Count > 0) _spEvents[animId] = events;
             return events;
         }
@@ -304,7 +308,7 @@ namespace SoulsAiStudio.App
                 string how = _handlers != null && _handlers.Handlers.TryGetValue(e.SpEffectId, out var h)
                     ? (h.Replans ? "Interrupt: Replanning()" : $"Interrupt line {h.Line + 1}")
                     : "no handler in Goal.Interrupt";
-                return $"  {e.SpEffectId} @ frames {e.Frame:0}–{e.EndFrame:0}  ({how})";
+                return $"  {e.SpEffectId} @ frames {e.Frame:0}–{e.EndFrame:0}{ViaText(e)}  ({how})";
             });
             return "TAE SpEffect events:\n" + string.Join("\n", lines);
         }
@@ -347,7 +351,7 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
             string label = k >= 0 && k < c.Count
-                ? $"SpEffect {c[k].SpEffectId} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.DependsOnDistance ? " [distance]" : c[k].Handler.HasStateCondition ? " [conditional]" : "")
+                ? $"SpEffect {c[k].SpEffectId}{(c[k].Via.Length > 0 ? " (cycle)" : "")} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.DependsOnDistance ? " [distance]" : c[k].Handler.HasStateCondition ? " [conditional]" : "")
                 : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available)";
             if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label)) return;
             try
@@ -356,7 +360,7 @@ namespace SoulsAiStudio.App
                 for (int i = 0; i < c.Count; i++)
                 {
                     var h = c[i].Handler;
-                    string text = $"SpEffect {c[i].SpEffectId} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
+                    string text = $"SpEffect {c[i].SpEffectId}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
                         + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.DependsOnDistance ? " [distance]" : h.HasStateCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _trigger.Remove((s.Line, depth)); _plan = null; }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.DependsOnDistance

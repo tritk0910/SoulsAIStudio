@@ -50,7 +50,8 @@ public class WritePolicyTests
         Assert.NotEmpty(WritePolicy.ValidateFolders(game, game));                  // mod == game
         Assert.NotEmpty(WritePolicy.ValidateFolders(game, w.Path));                // mod contains game
         Assert.NotEmpty(WritePolicy.ValidateFolders(game, "relative\\mod"));       // not rooted
-        Assert.NotEmpty(WritePolicy.ValidateFolders(game, ""));                    // empty
+        Assert.Empty(WritePolicy.ValidateFolders(game, ""));                       // empty = read-only project (game files only)
+        Assert.NotEmpty(WritePolicy.ValidateFolders("", ""));                      // the game folder is still required
         Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "script"))); // inside game, not mods
     }
 

@@ -54,6 +54,11 @@ namespace SoulsAiStudio.App
             {
                 if (!visible) return false;
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+                if (session.Project.IsReadOnly)
+                {
+                    ImGui.TextColored(Theme.Warn, "Read-only project (no mod folder): nothing can be unpacked or repacked.");
+                    return focused;
+                }
                 ImGui.TextWrapped("Unpack / repack the AI script archives of your mod, like dragging them onto WitchyBND. " +
                                   "Repack reads the folder's _witchy-bnd4.xml or _yabber-bnd4.xml, so it works for both tools. " +
                                   "Saving a script in the Lua Editor already updates both the .dcx and the folder; Repack is for edits made outside the app (e.g. VSCode).");
