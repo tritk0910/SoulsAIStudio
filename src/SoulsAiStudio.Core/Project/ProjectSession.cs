@@ -216,7 +216,7 @@ public sealed class ProjectSession
         {
             if (!Path.GetFullPath(p).StartsWith(mod, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Refusing to write outside the mod folder: {p}");
-            if (WritePolicy.WhyBlocked(p, [Project.GameDir]) is { } why)
+            if (WritePolicy.WhyBlocked(p, [Project.GameDir], Project.ModDir) is { } why)
                 throw new InvalidOperationException(why);
         }
     }

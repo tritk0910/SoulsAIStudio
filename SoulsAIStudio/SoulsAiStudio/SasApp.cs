@@ -511,7 +511,7 @@ namespace SoulsAiStudio.App
             if (Project != null && IsUnder(path, Project.GameViewDir))
                 return "This character is a read-only view of the game's file, so it can't be saved." +
                        (Project.IsReadOnly ? " This project has no mod folder." : " Use \"Copy to mod\" in the Project panel to edit a copy in your mod.");
-            return SoulsAiStudio.Core.IO.WritePolicy.WhyBlocked(path, new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() });
+            return SoulsAiStudio.Core.IO.WritePolicy.WhyBlocked(path, new[] { Project?.GameDir, Settings.LastGameDir, SasSettings.GuessGameDir() }, Project?.ModDir);
         }
 
         /// <summary>Exit prompt for unsaved Lua (UI thread). True = OK to exit.</summary>

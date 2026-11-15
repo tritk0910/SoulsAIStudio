@@ -154,7 +154,7 @@ public sealed class CharacterLocator(string gameDir, string modDir)
         string target = Path.Combine(modDir, "chr", id + ".anibnd.dcx");
         if (File.Exists(target)) throw new IOException($"{id}.anibnd.dcx already exists in the mod folder.");
         if (!File.Exists(source)) throw new FileNotFoundException($"{id}.anibnd.dcx is not in the game's chr folder.", source);
-        if (WritePolicy.WhyBlocked(target, [gameDir]) is { } why) throw new InvalidOperationException(why);
+        if (WritePolicy.WhyBlocked(target, [gameDir], modDir) is { } why) throw new InvalidOperationException(why);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         AtomicFile.WriteAllBytes(target, File.ReadAllBytes(source));
         return target;

@@ -45,7 +45,7 @@ namespace SoulsAiStudio.App
             if (!Main.AnyOodleExists()) Main.TryCopyOodleFromInterroot(gameDir, files.AnibndPath, SoulsAssetPipeline.SoulsGames.SDT);
             string anibndDir = Path.GetDirectoryName(Path.GetFullPath(files.AnibndPath))!;
             string workspaceJson = Path.Combine(anibndDir, "_DSAS_WORKSPACE.json");
-            bool canWriteWorkspace = WritePolicy.WhyBlocked(workspaceJson, new[] { gameDir }) == null;
+            bool canWriteWorkspace = WritePolicy.WhyBlocked(workspaceJson, new[] { gameDir }, modDir) == null;
             if (canWriteWorkspace && !File.Exists(workspaceJson))
                 doc.GameRoot.SetInterrootPickerPathsManually(anibndDir, gameDir, modDir, loadLooseParams: false);
             if (canWriteWorkspace || File.Exists(workspaceJson))

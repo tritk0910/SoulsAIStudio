@@ -1,14 +1,43 @@
 namespace SoulsAiStudio.Core.IO;
 
 /// <summary>
-/// The single rule for "may the app write here?" (review 12932e2 M2/M5): never inside a game install, except under
-/// that install's <c>mods\</c> folder. A folder is a game install when it contains <c>sekiro.exe</c> (or another
+/// The single rule for "may the app write here?" (review 12932e2 M2/M5): never into a game install's own files. Inside a
+/// game install, writes are allowed only under its <c>mods\</c> folder or under the project's mod folder, which may be
+/// anywhere (e.g. <c>Sekiro\MyMod</c>) as long as it is not the game root and not inside one of the game's data folders
+/// (<see cref="GameDataFolders"/>). A folder is a game install when it contains <c>sekiro.exe</c> (or another
 /// FromSoftware game exe / <c>Data*.bdt</c> archives), found by walking up from the target path — so it also
 /// protects Steam libraries on other drives without any configuration.
 /// </summary>
 public static class WritePolicy
 {
     private static readonly string[] GameExes = ["sekiro.exe", "DarkSoulsIII.exe", "eldenring.exe", "DarkSoulsRemastered.exe"];
+
+    /// <summary>
+    /// Top-level folders of an (UXM-unpacked) game install that hold the original game files, plus UXM's backups.
+    /// A mod folder may not be (inside) one of them.
+    /// </summary>
+    public static readonly IReadOnlySet<string> GameDataFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "action", "asset", "chr", "cutscene", "event", "facegen", "font", "map", "material", "menu", "movie", "msg", "mtd",
+        "obj", "other", "param", "parts", "script", "sfx", "shader", "sound", "_backup", "_unknown",
+    };
+
+    /// <summary>
+    /// Why <paramref name="modDir"/> can't hold mod files of the game at <paramref name="gameRoot"/>, or null if it can.
+    /// Outside the game: always fine. Inside: not the game root itself and not under a game data folder.
+    /// </summary>
+    public static string? WhyUnsafeModDir(string gameRoot, string modDir)
+    {
+        string game = WithSlash(Path.GetFullPath(gameRoot));
+        string mod = WithSlash(Path.GetFullPath(modDir));
+        if (string.Equals(mod, game, StringComparison.OrdinalIgnoreCase)) return "Mod folder and Sekiro folder are the same.";
+        if (game.StartsWith(mod, StringComparison.OrdinalIgnoreCase)) return "The mod folder contains the Sekiro folder.";
+        if (!mod.StartsWith(game, StringComparison.OrdinalIgnoreCase)) return null;
+        string first = mod[game.Length..].Split(Path.DirectorySeparatorChar)[0];
+        return GameDataFolders.Contains(first)
+            ? $"The mod folder is inside the game's own \"{first}\" folder, which holds the original game files. Pick another folder."
+            : null;
+    }
 
     /// <summary>True when <paramref name="dir"/> looks like a game install root.</summary>
     public static bool IsGameInstall(string dir)
@@ -26,8 +55,11 @@ public static class WritePolicy
         return null;
     }
 
-    /// <summary>Null when writing <paramref name="path"/> is allowed, otherwise a user-facing reason.</summary>
-    public static string? WhyBlocked(string path, IEnumerable<string?>? extraGameDirs = null)
+    /// <summary>
+    /// Null when writing <paramref name="path"/> is allowed, otherwise a user-facing reason. <paramref name="modDir"/> is the
+    /// project's mod folder: inside a game install, paths under it are allowed when it is a safe mod folder.
+    /// </summary>
+    public static string? WhyBlocked(string path, IEnumerable<string?>? extraGameDirs = null, string? modDir = null)
     {
         string full = Path.GetFullPath(path);
         var games = new List<string>();
@@ -40,8 +72,10 @@ public static class WritePolicy
             string root = WithSlash(game);
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
             if (full.StartsWith(root + "mods" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.IsNullOrWhiteSpace(modDir) && Path.IsPathRooted(modDir) && WhyUnsafeModDir(game, modDir) == null
+                && full.StartsWith(WithSlash(Path.GetFullPath(modDir)), StringComparison.OrdinalIgnoreCase)) continue;
             return $"Refusing to write into the game folder:\n{full}\n\n" +
-                   "Work from your mod folder (…\\mods\\<your mod>) so the original game files stay untouched.";
+                   "Work from your mod folder so the original game files stay untouched.";
         }
         return null;
     }
@@ -59,16 +93,12 @@ public static class WritePolicy
         if (!Path.IsPathRooted(modDir)) { problems.Add("Mod folder must be a full path."); return problems; }
         if (!Directory.Exists(modDir)) problems.Add("Mod folder not found.");
 
-        string mod = WithSlash(Path.GetFullPath(modDir));
-        if (IsGameInstall(modDir)) problems.Add("The mod folder is a game install. Pick your Mod Engine mod (…\\mods\\<your mod>).");
-        if (!string.IsNullOrWhiteSpace(gameDir) && Path.IsPathRooted(gameDir))
-        {
-            string game = WithSlash(Path.GetFullPath(gameDir));
-            if (string.Equals(mod, game, StringComparison.OrdinalIgnoreCase)) problems.Add("Mod folder and Sekiro folder are the same.");
-            else if (game.StartsWith(mod, StringComparison.OrdinalIgnoreCase)) problems.Add("The mod folder contains the Sekiro folder.");
-        }
-        if (WhyBlocked(Path.Combine(modDir, "script", "x.luabnd.dcx"), [gameDir]) != null)
-            problems.Add("The mod folder is inside the game folder but not under mods\\.");
+        if (IsGameInstall(modDir)) problems.Add("The mod folder is a game install. Pick your Mod Engine mod folder.");
+        if (!string.IsNullOrWhiteSpace(gameDir) && Path.IsPathRooted(gameDir) && WhyUnsafeModDir(gameDir, modDir) is { } why)
+            problems.Add(why);
+        // Another game install around the mod folder (e.g. a second Steam library).
+        else if (FindGameInstall(modDir) is { } other && WhyUnsafeModDir(other, modDir) is { } why2)
+            problems.Add(why2);
         return problems;
     }
 

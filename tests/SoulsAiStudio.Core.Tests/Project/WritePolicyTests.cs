@@ -52,7 +52,36 @@ public class WritePolicyTests
         Assert.NotEmpty(WritePolicy.ValidateFolders(game, "relative\\mod"));       // not rooted
         Assert.Empty(WritePolicy.ValidateFolders(game, ""));                       // empty = read-only project (game files only)
         Assert.NotEmpty(WritePolicy.ValidateFolders("", ""));                      // the game folder is still required
-        Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "script"))); // inside game, not mods
+        Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "script"))); // a game data folder
+    }
+
+    [Fact]
+    public void ModFolder_InsideGame_OutsideMods_IsAllowed_ButNeverAGameDataFolder()
+    {
+        var (w, game, _) = FakeInstall();
+        using var _w = w;
+        string myMod = Path.Combine(game, "MyMod");             // Sekiro\MyMod (not under mods\)
+        string nested = Path.Combine(game, "work", "Severance"); // Sekiro\work\Severance
+        Directory.CreateDirectory(myMod);
+        Directory.CreateDirectory(nested);
+        Directory.CreateDirectory(Path.Combine(game, "chr", "x"));
+
+        Assert.Empty(WritePolicy.ValidateFolders(game, myMod));
+        Assert.Empty(WritePolicy.ValidateFolders(game, nested));
+        Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "chr")));       // original game files
+        Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "chr", "x")));  // inside a game data folder
+        Assert.NotEmpty(WritePolicy.ValidateFolders(game, Path.Combine(game, "_backup")));  // UXM backups
+
+        // Writes: allowed under the project's mod folder, still blocked for the game's own files.
+        Assert.Null(WritePolicy.WhyBlocked(Path.Combine(myMod, "chr", "c5060.anibnd.dcx"), [game], myMod));
+        Assert.NotNull(WritePolicy.WhyBlocked(Path.Combine(myMod, "chr", "c5060.anibnd.dcx"), [game]));            // no mod folder given
+        Assert.NotNull(WritePolicy.WhyBlocked(Path.Combine(game, "chr", "c5060.anibnd.dcx"), [game], myMod));      // game file
+        Assert.NotNull(WritePolicy.WhyBlocked(Path.Combine(game, "chr", "c5060.anibnd.dcx"), [game], Path.Combine(game, "chr"))); // unsafe mod dir
+        Assert.NotNull(WritePolicy.WhyBlocked(Path.Combine(game, "sekiro.exe"), [game], game));                    // mod == game root
+        Assert.Null(WritePolicy.WhyBlocked(Path.Combine(game, "mods", "M", "a.dcx"), [game]));                      // mods\ still fine
+
+        var p = SasProject.Create(Path.Combine(w.Path, "p", "p.sasproj"), "p", game, myMod, []);
+        Assert.False(p.IsReadOnly);
     }
 
     [Fact]
