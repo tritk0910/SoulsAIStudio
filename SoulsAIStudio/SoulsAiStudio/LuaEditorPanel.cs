@@ -237,8 +237,9 @@ namespace SoulsAiStudio.App
             var (line, col) = o.Editor.Cursor;
             foreach (var a in o.AnimsByLine[line])
             {
-                if (ImGui.SmallButton($"▶ {a.AnimId}##play{a.AnimId}")) _app.PlayAnim(a.AnimId);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{a.GoalType}: play anim a000_{a.AnimId:D6} in the viewport");
+                if (ImGui.SmallButton($"▶ {a.AnimId}##play{a.AnimId}")) _app.PlayLuaAnim(a.AnimId);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{a.GoalType}: play anim {SoulsAiStudio.Core.Project.AnimIds.Format(_app.TaeAnimId(a.AnimId))} in the viewport" +
+                                                            "\n(the a### part is the script's Anim category, Project panel)");
                 ImGui.SameLine();
             }
             ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+G go to line · Ctrl+S save");

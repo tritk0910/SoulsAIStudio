@@ -115,6 +115,15 @@ public sealed class ProjectScript
     /// <summary>Character override, e.g. <c>c5060</c>. Empty = guessed from the script id (see <see cref="CharacterLocator"/>).</summary>
     public string Character { get; set; } = "";
 
+    /// <summary>
+    /// TAE anim category the script's anim ids refer to: <c>3000</c> in the Lua = <c>aXXX_003000</c>. 0 = <c>a000</c> (default).
+    /// E.g. Isshin's spear phase (<c>540310_battle.lua</c>) uses <c>a100</c>.
+    /// </summary>
+    public int AnimCategory { get; set; }
+
+    /// <summary>TAE anim id (category * 1,000,000 + id) for an anim id written in this script. Full ids pass through.</summary>
+    public int ToTaeAnimId(int luaAnimId) => AnimIds.WithCategory(luaAnimId, AnimCategory);
+
     [JsonIgnore] public string FileName => EntryPath[(EntryPath.LastIndexOf('\\') + 1)..];
     [JsonIgnore] public string Key => $"{Luabnd}|{EntryPath}";
     [JsonIgnore] public string Label => string.IsNullOrEmpty(DisplayName) ? FileName : $"{DisplayName} ({FileName})";

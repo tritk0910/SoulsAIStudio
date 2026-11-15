@@ -145,10 +145,14 @@ public static class ComboScript
         for (int i = 0; i < steps.Count; i++)
         {
             var entry = i == 0 ? ComboCut.ComboAttackQueued : steps[i - 1].OwnCut;
-            sb.Append(KeywordFor(entry)).Append(' ').Append(steps[i].AnimId).Append('\n');
+            sb.Append(KeywordFor(entry)).Append(' ').Append(FormatAnimId(steps[i].AnimId)).Append('\n');
         }
         return sb.ToString();
     }
+
+    /// <summary>Bare ids as typed (<c>3002</c>); ids in another category as <c>a100_003002</c>.</summary>
+    public static string FormatAnimId(int id) =>
+        id >= Project.AnimIds.CategoryFactor ? Project.AnimIds.Format(id) : id.ToString(CultureInfo.InvariantCulture);
 
     private static string StripComment(string s)
     {

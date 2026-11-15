@@ -450,7 +450,29 @@ namespace SoulsAiStudio.App
         public void PlayAnim(int animId)
         {
             if (!Bridge.GotoAnim(animId))
-                Notify($"Anim {animId} not found — load the character first (Project panel → Load model & anims, or click a character).");
+                Notify($"Anim {AnimIds.Format(animId)} not found — load the character first (Project panel → Load model & anims, or click a character)," +
+                       " or check the script's Anim category (Project panel).");
+        }
+
+        /// <summary>
+        /// TAE anim id for an anim id written in the open script: its Anim category is applied (Isshin spear 540310:
+        /// 3000 → a100_003000). Full ids (aXXX_ already) pass through.
+        /// </summary>
+        public int TaeAnimId(int luaAnimId) => _editor.ActiveScript?.ToTaeAnimId(luaAnimId) ?? luaAnimId;
+
+        /// <summary>Plays an anim id written in the open script (see <see cref="TaeAnimId"/>).</summary>
+        public void PlayLuaAnim(int luaAnimId) => PlayAnim(TaeAnimId(luaAnimId));
+
+        /// <summary>Anim category of the open script (0 = a000).</summary>
+        public int ActiveAnimCategory => _editor.ActiveScript?.AnimCategory ?? 0;
+
+        public void SetAnimCategory(ProjectScript script, int category)
+        {
+            if (script.AnimCategory == category) return;
+            script.AnimCategory = category;
+            SaveProjectUiState();
+            Notify(category == 0 ? $"{script.FileName}: anim ids refer to a000 (default)."
+                                 : $"{script.FileName}: anim ids refer to a{category:D3} (e.g. 3000 → a{category:D3}_003000).");
         }
 
         // ---------- safety for DSAS writes ----------

@@ -190,7 +190,7 @@ namespace SoulsAiStudio.App
                         }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Click: select (cut points on the right) + play this anim alone");
                         ImGui.TableNextColumn();
-                        ImGui.TextColored(isPlaying ? Theme.Ok : Theme.Accent, s.AnimId.ToString());
+                        ImGui.TextColored(isPlaying ? Theme.Ok : Theme.Accent, ComboScript.FormatAnimId(s.AnimId));
                         ImGui.TableNextColumn();
                         if (p == null) ImGui.TextDisabled("–");
                         else if (p.Missing) ImGui.TextColored(Theme.Error, "missing");
@@ -227,7 +227,7 @@ namespace SoulsAiStudio.App
                 return;
             }
             var step = _parsed.Steps[_selected];
-            ImGui.TextColored(Theme.Accent, $"Anim {step.AnimId} can end at:");
+            ImGui.TextColored(Theme.Accent, $"Anim {ComboScript.FormatAnimId(step.AnimId)} can end at:");
             ImGui.TextDisabled(_selected + 1 < _parsed.Steps.Count ? $"click = keyword of line {_parsed.Steps[_selected + 1].Line + 1}" : "click = add a next line");
 
             var jumps = _app.Bridge.GetJumpTableEvents(step.AnimId);
@@ -265,8 +265,11 @@ namespace SoulsAiStudio.App
                 var next = _parsed.Steps[_selected + 1];
                 string old = lines[next.Line];
                 int indent = old.Length - old.TrimStart().Length;
-                string idText = next.AnimId.ToString();
-                int at = old.IndexOf(" " + idText, StringComparison.Ordinal);
+                // The id may be typed "3001", "a000_003001" or "a100_003022": find whichever form the line uses.
+                string idText = ComboScript.FormatAnimId(next.AnimId);
+                int at = -1;
+                foreach (string form in new[] { idText, SoulsAiStudio.Core.Project.AnimIds.Format(next.AnimId), next.AnimId.ToString() })
+                    if ((at = old.IndexOf(" " + form, StringComparison.OrdinalIgnoreCase)) >= 0) break;
                 string rest = at >= 0 ? old[(at + 1)..] : idText;
                 lines[next.Line] = old[..indent] + keyword + " " + rest;
             }
@@ -289,13 +292,15 @@ namespace SoulsAiStudio.App
         {
             var text = _app.ActiveScriptText;
             if (text == null || _app.Bridge.LoadedAnibnd == null) return null;
-            foreach (int anim in AnimReferences.Build(text).Select(a => a.AnimId).Distinct())
+            foreach (int luaAnim in AnimReferences.Build(text).Select(a => a.AnimId).Distinct())
             {
-                foreach (var (sp, frame, _) in _app.Bridge.GetSpEffectEvents(anim))
+                int animId = _app.TaeAnimId(luaAnim); // script's Anim category (e.g. a100)
+                string anim = ComboScript.FormatAnimId(animId);
+                foreach (var (sp, frame, _) in _app.Bridge.GetSpEffectEvents(animId))
                 {
                     var h = _handlerFor(sp);
                     if (h == null || h.DependsOnDistance) continue;
-                    var chain = ComboSequence.Flatten(h.Body, _ => 0).Select(x => x.AnimId).ToList();
+                    var chain = ComboSequence.Flatten(h.Body, _ => 0).Select(x => ComboScript.FormatAnimId(_app.TaeAnimId(x.AnimId))).ToList();
                     if (chain.Count == 0) continue;
                     var sb = new System.Text.StringBuilder();
                     sb.Append($"# SpEffect interrupt, from your files:\n");
@@ -304,7 +309,7 @@ namespace SoulsAiStudio.App
                     sb.Append($"# so {anim} is cut at frame {frame:0} and {string.Join(" → ", chain)} plays next.\n");
                     sb.Append($"EnemyComboAtk {anim}\n");
                     sb.Append($"SpEffect {sp} {chain[0]}\n");
-                    foreach (int next in chain.Skip(1)) sb.Append($"EnemyComboAtk {next}\n");
+                    foreach (string next in chain.Skip(1)) sb.Append($"EnemyComboAtk {next}\n");
                     return sb.ToString();
                 }
             }

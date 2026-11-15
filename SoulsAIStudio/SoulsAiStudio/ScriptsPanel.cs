@@ -203,11 +203,44 @@ namespace SoulsAiStudio.App
                                      "writes its workspace files next to what it opens). This copies the anibnd into the mod's chr folder and loads it.");
             }
             else if (ImGui.Button(loaded ? "Reload##sas_chr_load" : "Load model & anims##sas_chr_load")) _app.LoadCharacter(script);
+            AnimCategoryField(script);
             if (files != null)
             {
                 ImGui.TextDisabled($"{files.ChrId} ({(files.AnibndFromMod ? "mod" : "game")}){(loaded ? " – loaded" : "")}");
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(files.AnibndPath + "\n" + (files.ChrbndPath ?? "(no chrbnd)"));
             }
+        }
+
+        private string _catEdit = "";
+        private string? _catEditKey;
+        private bool _catError;
+
+        /// <summary>
+        /// Which TAE category the script's anim ids refer to (a000 by default). Isshin's spear phase (540310_battle.lua)
+        /// plays a100: 3000 in the Lua = a100_003000.
+        /// </summary>
+        private void AnimCategoryField(SoulsAiStudio.Core.Project.ProjectScript script)
+        {
+            if (_catEditKey != script.Key) { _catEditKey = script.Key; _catEdit = $"a{script.AnimCategory:D3}"; _catError = false; }
+            ImGui.Text("Anim category");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(70);
+            if (_catError) ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.45f, 0.15f, 0.15f, 1f));
+            bool enter = ImGui.InputTextWithHint("##sas_animcat", "a000", ref _catEdit, 8, ImGuiInputTextFlags.EnterReturnsTrue);
+            bool done = enter || ImGui.IsItemDeactivatedAfterEdit();
+            if (_catError) ImGui.PopStyleColor();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("TAE category the anim ids in this script refer to. a000 (default): 3000 = a000_003000.\n" +
+                                 "Set a100 for e.g. Isshin's spear phase (540310_battle.lua): 3000 = a100_003000.\n" +
+                                 "Used by the ▶ buttons, the Combo player (From Lua) and \"→ Manual\". Enter to apply.");
+            if (!done) return;
+            if (AnimIds.ParseCategory(_catEdit) is int c)
+            {
+                _catError = false;
+                _app.SetAnimCategory(script, c);
+                _catEdit = $"a{c:D3}";
+            }
+            else _catError = true;
         }
 
         private void BuildOutline()

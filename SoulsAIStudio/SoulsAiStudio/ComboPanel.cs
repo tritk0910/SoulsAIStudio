@@ -133,7 +133,8 @@ namespace SoulsAiStudio.App
                                  "Off: this tab stays on the current goal, wherever you move the cursor.\n" +
                                  "Useful to keep a combo while you read Goal.Interrupt or another goal.");
 
-            if (_spEventsAnibnd != _app.Bridge.LoadedAnibnd) { _spEvents.Clear(); _spEventsAnibnd = _app.Bridge.LoadedAnibnd; }
+            string spKey = _app.Bridge.LoadedAnibnd + "|" + _app.ActiveAnimCategory; // the cache holds Lua ids: reset when the category changes
+            if (_spEventsAnibnd != spKey) { _spEvents.Clear(); _spEventsAnibnd = spKey; }
             var path = BuildPath(_nodes, 0);
             bool loaded = _app.Bridge.LoadedAnibnd != null;
             if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Project panel → Load model & anims, or click a character).");
@@ -153,7 +154,7 @@ namespace SoulsAiStudio.App
             if (ImGui.Button("→ Manual") && path.Count > 0)
             {
                 _manual.SetText($"# From Lua: Goal.{_goal.Name} (line {_goal.Line + 1})\n" + ComboScript.Format(path.Select(p =>
-                    (p.Step.AnimId, p.SpEffectId is int sp ? new ComboCut(-1, sp, p.Cut != p.SpStart ? p.Cut : null) : ComboCut.ComboAttackQueued)).ToList()));
+                    (_app.TaeAnimId(p.Step.AnimId), p.SpEffectId is int sp ? new ComboCut(-1, sp, p.Cut != p.SpStart ? p.Cut : null) : ComboCut.ComboAttackQueued)).ToList()));
                 _selectManual = true;
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy this path (with its SpEffect interrupts) into the Manual tab as a combo script to edit");
@@ -221,7 +222,7 @@ namespace SoulsAiStudio.App
             {
                 var s = steps[i];
                 var c = Candidates(s.AnimId);
-                float? queued = i < steps.Count - 1 ? _app.Bridge.GetComboQueuedFrame(s.AnimId) : null;
+                float? queued = i < steps.Count - 1 ? _app.Bridge.GetComboQueuedFrame(_app.TaeAnimId(s.AnimId)) : null;
                 int pick = -1;
                 for (int k = 0; k < c.Count && pick < 0; k++)
                 {
@@ -288,7 +289,7 @@ namespace SoulsAiStudio.App
         private IReadOnlyList<(int SpEffectId, float Frame, float EndFrame)> SpEvents(int animId)
         {
             if (_spEvents.TryGetValue(animId, out var events)) return events;
-            events = _app.Bridge.GetSpEffectEvents(animId);
+            events = _app.Bridge.GetSpEffectEvents(_app.TaeAnimId(animId));
             if (events.Count > 0) _spEvents[animId] = events;
             return events;
         }
@@ -369,7 +370,7 @@ namespace SoulsAiStudio.App
         private void Play(List<PathItem> path)
         {
             _manual.StopLooping();
-            _plan = _app.Bridge.PlayCombo(path.Select(p => (p.Step.AnimId, p.Cut)).ToList());
+            _plan = _app.Bridge.PlayCombo(path.Select(p => (_app.TaeAnimId(p.Step.AnimId), p.Cut)).ToList());
             if (_plan == null) _app.Notify("Load the character first (Project panel → Load model & anims, or click a character).");
         }
 
@@ -390,7 +391,7 @@ namespace SoulsAiStudio.App
                             {
                                 _editor.JumpTo(s.Line);
                                 if (_editor.Active is { } ed) _ownJump = ed.Editor.Cursor;
-                                _app.PlayAnim(s.AnimId);
+                                _app.PlayLuaAnim(s.AnimId);
                             }
                             if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\n\n" + SpEffectSummary(s.AnimId));
                             DrawInterruptChoice(s, level);
@@ -441,9 +442,9 @@ namespace SoulsAiStudio.App
             {
                 foreach (var p in _plan!)
                 {
-                    if (p.Missing) { ImGui.TextColored(Theme.Error, $"{p.AnimId}: {p.CutReason}"); continue; }
+                    if (p.Missing) { ImGui.TextColored(Theme.Error, $"{ComboScript.FormatAnimId(p.AnimId)}: {p.CutReason}"); continue; }
                     var col = idx == playing ? Theme.Ok : Theme.Dim;
-                    ImGui.TextColored(col, $"{(idx == playing ? "▶" : " ")} {p.AnimId}  frames 0–{p.EndFrame:0} / {p.TotalFrames:0}  ({p.CutReason})");
+                    ImGui.TextColored(col, $"{(idx == playing ? "▶" : " ")} {ComboScript.FormatAnimId(p.AnimId)}  frames 0–{p.EndFrame:0} / {p.TotalFrames:0}  ({p.CutReason})");
                     idx++;
                 }
             }
