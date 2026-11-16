@@ -29,6 +29,16 @@ namespace SoulsAiStudio.App
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
 
         /// <summary>
+        /// Launch credits screen: our name and the fork's own components on top; DS Anim Studio's credits and thanks
+        /// follow unchanged (respect for everyone who built and supported DSAS).
+        /// </summary>
+        public static string SplashText(string dsasCredits) =>
+            $"SOULS AI STUDIO {AppVersion} - Lua AI editor for Sekiro, built on DS Anim Studio (GPLv3)\n" +
+            "ImGuiColorTextEditNet (c) 2017 BalazsJako, 2022 CSinkers - DSLuaDecompiler (c) 2019 katalash\n\n" +
+            "Built on the work of everyone below - thank you.\n\n" +
+            dsasCredits;
+
+        /// <summary>
         /// Starting camera distance when a character loads. DSAS frames the hit capsule edge to edge, which is very close;
         /// we back off so the whole character, its weapon swings and the ground around it are visible.
         /// </summary>

@@ -17,6 +17,7 @@ namespace DSAnimStudio
         [STAThread]
         static void Main(string[] args)
         {
+            if (SoulsAiStudio.App.UpdateService.RunApplyModeIfRequested(args)) return; // [SAS] started as the updater (copies a new version over the old one)
 
             //SoulsFormatsNEXT TODO
             //SoulsFormats.DCX.LoadOodleAction = () =>
@@ -69,6 +70,7 @@ namespace DSAnimStudio
             }
             finally
             {
+                SoulsAiStudio.App.UpdateService.LaunchPendingUpdate(); // [SAS] "Restart to update": start the updater now that the app is closing
                 LiveRefresh.Memory.CloseHandle();
                 MainInstance?.Dispose();
                 System.Diagnostics.Process.GetCurrentProcess().Kill();

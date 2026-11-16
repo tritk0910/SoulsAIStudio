@@ -36,6 +36,7 @@ namespace SoulsAiStudio.App
         private readonly LuabndToolsPanel _luabnd;
         private readonly EventFinderPanel _finder;
         private readonly SpEffectLabelsWindow _spLabels;
+        private readonly UpdateService _updates;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -50,6 +51,7 @@ namespace SoulsAiStudio.App
             _luabnd = new LuabndToolsPanel(this);
             _finder = new EventFinderPanel(this);
             _spLabels = new SpEffectLabelsWindow(this);
+            _updates = new UpdateService(this);
             Bridge.FormatSpEffect = SpEffectText;
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             DSAnimStudio.zzz_NotificationManagerIns.HideNotificationPopups = Settings.HideNotificationPopups;
@@ -195,6 +197,7 @@ namespace SoulsAiStudio.App
             }
             focused |= _finder.Build(); // works with any loaded character, project or not
             focused |= _spLabels.Build();
+            _updates.Build(); // checks GitHub on the first frame when enabled; shows the window when there is an update
             bool inProject = Session != null;
             Layout.ProbeWindows(new[]
             {
@@ -236,6 +239,14 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
             if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
+            if (ImGui.BeginMenu("Updates"))
+            {
+                if (ImGui.MenuItem("Check for Updates...")) _updates.StartCheck(manual: true);
+                if (ImGui.MenuItem("Check on Launch", "", Settings.CheckForUpdatesOnStartup)) { Settings.CheckForUpdatesOnStartup = !Settings.CheckForUpdatesOnStartup; Settings.Save(); }
+                if (ImGui.MenuItem("Include Pre-releases", "", Settings.IncludePrereleaseUpdates)) { Settings.IncludePrereleaseUpdates = !Settings.IncludePrereleaseUpdates; Settings.Save(); }
+                ImGui.TextDisabled($"Current version: {SasHooks.AppVersion}");
+                ImGui.EndMenu();
+            }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)...", "", false, Session != null)) _luabnd.Open();
             if (ImGui.IsItemHovered())

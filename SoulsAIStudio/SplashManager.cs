@@ -123,7 +123,7 @@ namespace DSAnimStudio
                 }
             }
 
-            SplashText = Main.GetEmbeddedResourceText($@"/EmbRes/Credits.txt");
+            SplashText = SoulsAiStudio.App.SasHooks.SplashText(Main.GetEmbeddedResourceText($@"/EmbRes/Credits.txt")); // [SAS] app name on top, DSAS credits kept as they are
         }
 
         public static void DrawSplash(bool clear)

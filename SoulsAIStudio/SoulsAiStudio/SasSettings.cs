@@ -27,6 +27,12 @@ namespace SoulsAiStudio.App
         public bool AllowImeInEditor { get; set; }
         /// <summary>DSAS Log window's "Hide Popup Notifications" (DSAS keeps it only in memory). See SasHooks.HideNotificationPopupsChanged.</summary>
         public bool HideNotificationPopups { get; set; }
+        /// <summary>Ask GitHub for a newer release on launch (Souls AI > Updates). See UpdateService.</summary>
+        public bool CheckForUpdatesOnStartup { get; set; } = true;
+        /// <summary>Offer pre-releases too (every release so far is one).</summary>
+        public bool IncludePrereleaseUpdates { get; set; } = true;
+        /// <summary>Release tag the user chose to skip: not offered on launch (a manual check still shows it).</summary>
+        public string? SkippedUpdateTag { get; set; }
 
         /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
         public float SoundVolume { get; set; } = 100;
