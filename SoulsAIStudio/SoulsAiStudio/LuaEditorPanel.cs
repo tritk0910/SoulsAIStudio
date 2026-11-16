@@ -8,16 +8,17 @@ using ImGuiNET;
 using SoulsAiStudio.Core.Lua.Analysis;
 using SoulsAiStudio.Core.Project;
 using SoulsAiStudio.Editor;
+using SoulsAiStudio.Editor.Completion;
 
 namespace SoulsAiStudio.App
 {
     /// <summary>A script open in the editor, with its analysis snapshot.</summary>
     public sealed class OpenScript
     {
-        public OpenScript(ProjectScript script, DsasKeyInput keys)
+        public OpenScript(ProjectScript script, DsasKeyInput keys, ICompletionProvider? completions = null)
         {
             Script = script;
-            Editor = new LuaCodeEditor { KeyInput = keys };
+            Editor = new LuaCodeEditor { KeyInput = keys, CompletionProvider = completions };
             Editor.TextChanged += () => LastEdit = DateTime.UtcNow;
         }
 
@@ -60,6 +61,8 @@ namespace SoulsAiStudio.App
         private readonly SasApp _app;
         private readonly List<OpenScript> _open = new();
         private readonly DsasKeyInput _keys = new();
+        /// <summary>Autocomplete names from every open script + Sekiro AI seeds (shared by all editors).</summary>
+        private readonly WorkspaceCompletionProvider _completions = new();
         private OpenScript? _active;
         private OpenScript? _selectTab; // force-select next frame (ImGui keeps its own tab selection otherwise)
         private string _navFilter = "";
@@ -87,7 +90,7 @@ namespace SoulsAiStudio.App
             var existing = _open.FirstOrDefault(o => o.Script.Key == script.Key);
             if (existing == null)
             {
-                existing = new OpenScript(script, _keys) { Loading = _app.Session!.OpenAsync(script) };
+                existing = new OpenScript(script, _keys, _completions) { Loading = _app.Session!.OpenAsync(script) };
                 _open.Add(existing);
             }
             _active = _selectTab = existing;
@@ -116,6 +119,7 @@ namespace SoulsAiStudio.App
         public void CloseAll()
         {
             _open.Clear();
+            _completions.Clear();
             _active = null;
         }
 
@@ -192,6 +196,7 @@ namespace SoulsAiStudio.App
             if (close != null)
             {
                 _open.Remove(close);
+                _completions.RemoveDocument(close.Script.Key);
                 if (_active == close) _active = _open.FirstOrDefault();
             }
         }
@@ -247,7 +252,7 @@ namespace SoulsAiStudio.App
                                                             "\n(the a### part is the script's Anim category, Project panel)");
                 ImGui.SameLine();
             }
-            ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+G go to line · Ctrl+S save");
+            ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+H replace · Ctrl+Space suggest · Ctrl+G go to line · Ctrl+S save");
         }
 
         private static void BuildStatusLine(OpenScript o)
@@ -298,8 +303,10 @@ namespace SoulsAiStudio.App
             {
                 o.OutlineVersion = o.Editor.Version;
                 string snapshot = o.Editor.Text;
+                string key = o.Script.Key;
                 o.OutlineTask = Task.Run(() =>
                 {
+                    _completions.SetDocument(key, LuaCompletionScanner.Scan(snapshot)); // thread-safe
                     var tokens = SoulsAiStudio.Core.Lua.Syntax.LuaLexer.Tokenize(snapshot);
                     return (GoalOutline.Build(snapshot, tokens), AnimReferences.Build(snapshot, tokens).ToLookup(a => a.Line));
                 });

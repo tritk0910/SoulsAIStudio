@@ -169,6 +169,22 @@ namespace SoulsAiStudio.App
         /// <summary>Max cycle depth followed (205032 → 5032 → …); also stops loops.</summary>
         private const int MaxCycleDepth = 3;
 
+        /// <summary>SpEffect id → display text (id + user label / param name) for combo cut reasons; set by SasApp.</summary>
+        public Func<int, string>? FormatSpEffect { get; set; }
+
+        private string Sp(int id) => FormatSpEffect?.Invoke(id) ?? id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>SpEffectParam row name of a SpEffect, or null (no params loaded / no row / unnamed).</summary>
+        public string? SpEffectName(int id)
+        {
+            try
+            {
+                var spParams = zzz_DocumentManager.CurrentDocument?.ParamManager?.SpEffectParam;
+                return spParams != null && spParams.TryGetValue(id, out var p) && !string.IsNullOrWhiteSpace(p.Name) ? p.Name : null;
+            }
+            catch { return null; }
+        }
+
         /// <summary>SpEffect events in an anim's TAE plus their cycle SpEffects, sorted by start frame. Empty if not loaded.</summary>
         public IReadOnlyList<SpEffectEvent> GetSpEffectEventsDetailed(int animId)
         {
@@ -280,14 +296,14 @@ namespace SoulsAiStudio.App
                 {
                     var w = FirstWindow(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp)
                             ?? CycleWindow(req.AnimId, sp); // [cycle] SpEffect applied by a TAE SpEffect's SpEffectParam
-                    if (w is not { } win) { reason = $"SpEffect {sp} not in TAE → anim end"; warn = true; }
+                    if (w is not { } win) { reason = $"SpEffect {Sp(sp)} not in TAE → anim end"; warn = true; }
                     else if (req.Cut.AtFrame is float at)
                     {
                         end = Math.Clamp(at, win.Start, win.End);
-                        reason = $"SpEffect {sp} @ f{end:0} (active f{win.Start:0}–{win.End:0})";
+                        reason = $"SpEffect {Sp(sp)} @ f{end:0} (active f{win.Start:0}–{win.End:0})";
                         if (at < win.Start || at > win.End) { reason += $": f{at:0} is outside, clamped"; warn = true; }
                     }
-                    else { end = win.Start; reason = $"SpEffect {sp}"; }
+                    else { end = win.Start; reason = $"SpEffect {Sp(sp)}"; }
                 }
                 else if (req.Cut.JumpTableFlag >= 0)
                 {

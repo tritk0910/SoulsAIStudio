@@ -49,7 +49,7 @@ namespace DSAnimStudio.ImguiOSD
 
             protected override void BuildContents(ref bool anyFieldFocused)
             {
-                ImGui.Checkbox("Hide Popup Notifications", ref zzz_NotificationManagerIns.HideNotificationPopups);
+                if (ImGui.Checkbox("Hide Popup Notifications", ref zzz_NotificationManagerIns.HideNotificationPopups)) SoulsAiStudio.App.SasHooks.HideNotificationPopupsChanged(zzz_NotificationManagerIns.HideNotificationPopups); // [SAS] persist
                 lock (zzz_NotificationManagerIns._lock_notifications)
                 {
                     if (Tools.SimpleClickButton("Clear Notification History"))

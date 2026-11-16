@@ -13,6 +13,8 @@ public enum EditorKey
     F,      // Ctrl+F  find
     G,      // Ctrl+G  go to line
     F3,     // F3 / Shift+F3  find next / previous
+    H,      // Ctrl+H  find + replace
+    Space,  // Ctrl+Space  suggestions
     Count,
 }
 
@@ -22,8 +24,8 @@ public enum EditorKey
 /// <para>
 /// HOST CONTRACT (DSAS): DSAS's ImGuiRenderer forwards only modifiers, arrows, Home/End, PageUp/Down,
 /// Delete, Backspace, Enter, Escape, Tab and A/C/V/X/Y/Z to ImGui. <see cref="ImGuiKeyInput"/> covers
-/// those. The host MUST additionally report <see cref="EditorKey.F"/>, <see cref="EditorKey.G"/> and
-/// <see cref="EditorKey.F3"/> (e.g. subclass <see cref="ImGuiKeyInput"/> and OR in MonoGame
+/// those. The host MUST additionally report <see cref="EditorKey.F"/>, <see cref="EditorKey.G"/>, <see cref="EditorKey.H"/>,
+/// <see cref="EditorKey.Space"/> and <see cref="EditorKey.F3"/> (e.g. subclass <see cref="ImGuiKeyInput"/> and OR in MonoGame
 /// <c>Main.Input.KeyDown(Keys.F)</c>), or forward those keys to ImGui via <c>io.AddKeyEvent</c>.
 /// Typed characters come from ImGui's input queue (DSAS feeds it from <c>Window.TextInput</c>; '\t' is
 /// filtered there, Tab is handled as a key here).
@@ -93,6 +95,8 @@ public class ImGuiKeyInput : IKeyInput
         EditorKey.F => ImGuiKey.F,
         EditorKey.G => ImGuiKey.G,
         EditorKey.F3 => ImGuiKey.F3,
+        EditorKey.H => ImGuiKey.H,
+        EditorKey.Space => ImGuiKey.Space,
         _ => ImGuiKey.None,
     };
 }

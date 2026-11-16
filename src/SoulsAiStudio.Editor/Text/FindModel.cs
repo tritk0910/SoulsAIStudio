@@ -109,6 +109,8 @@ internal sealed class FindModel
         return n;
     }
 
+    int[] _matchesBeforeLine = new int[64]; // cumulative match count before each line (valid with _matchCount)
+
     /// <summary>Total match count; recomputed only when the text or query changed.</summary>
     public int CountMatches(TextBuffer buffer)
     {
@@ -117,9 +119,97 @@ internal sealed class FindModel
         if (_countVersion == buffer.Version && _countQueryStamp == _queryStamp)
             return _matchCount;
 
+        int lines = buffer.LineCount;
+        if (_matchesBeforeLine.Length < lines + 1)
+            _matchesBeforeLine = new int[Math.Max(lines + 1, _matchesBeforeLine.Length * 2)];
         int total = 0;
-        for (int i = 0; i < buffer.LineCount; i++)
+        for (int i = 0; i < lines; i++)
         {
+            _matchesBeforeLine[i] = total;
+            total += CountInLine(buffer.GetLineSpan(i), int.MaxValue);
+        }
+        _matchesBeforeLine[lines] = total;
+        _matchCount = total;
+        _countVersion = buffer.Version;
+        _countQueryStamp = _queryStamp;
+        return total;
+    }
+
+    /// <summary>Non-overlapping matches in <paramref name="line"/> that start before <paramref name="beforeColumn"/>.</summary>
+    int CountInLine(ReadOnlySpan<char> line, int beforeColumn)
+    {
+        int n = 0, col = 0;
+        while (col <= line.Length - _queryLength)
+        {
+            int idx = line[col..].IndexOf(Query, Comparison);
+            if (idx < 0 || col + idx >= beforeColumn)
+                break;
+            n++;
+            col += idx + _queryLength;
+        }
+        return n;
+    }
+
+    /// <summary>True when [start, end) is exactly one occurrence of the query (same line, same length, equal text).</summary>
+    public bool IsMatchAt(TextBuffer buffer, Coordinates start, Coordinates end)
+    {
+        if (!HasQuery || start.Line != end.Line || end.Column - start.Column != _queryLength)
+            return false;
+        if (start.Line < 0 || start.Line >= buffer.LineCount)
+            return false;
+        var line = buffer.GetLineSpan(start.Line);
+        if (start.Column < 0 || end.Column > line.Length)
+            return false;
+        return line[start.Column..end.Column].Equals(Query, Comparison);
+    }
+
+    /// <summary>
+    /// 1-based index of the match [start, end) among all matches (in the same non-overlapping order as
+    /// <see cref="CountMatches"/>), or 0 when the range is not one of them. O(length of that line) after the count is cached.
+    /// </summary>
+    public int MatchIndex(TextBuffer buffer, Coordinates start, Coordinates end)
+    {
+        if (!IsMatchAt(buffer, start, end))
+            return 0;
+        if (CountMatches(buffer) == 0)
+            return 0;
+        var line = buffer.GetLineSpan(start.Line);
+        int before = CountInLine(line, start.Column);
+        // the match must be one the enumeration actually lands on (overlapping queries like "aa" in "aaa")
+        if (CountInLine(line, start.Column + 1) != before + 1)
+            return 0;
+        return _matchesBeforeLine[start.Line] + before + 1;
+    }
+
+    /// <summary>
+    /// Text of lines [first, last] with every match replaced, for a single-step Replace All. Returns the number of
+    /// replacements (0 = nothing to do, outputs undefined). Line count never changes (single-line query/replacement).
+    /// </summary>
+    public int BuildReplaceAll(TextBuffer buffer, ReadOnlySpan<char> replacement, out int firstLine, out int lastLine, out string text)
+    {
+        firstLine = lastLine = -1;
+        text = "";
+        if (!HasQuery)
+            return 0;
+        int lines = buffer.LineCount;
+        for (int i = 0; i < lines && firstLine < 0; i++)
+            if (buffer.GetLineSpan(i).IndexOf(Query, Comparison) >= 0)
+                firstLine = i;
+        if (firstLine < 0)
+            return 0;
+        for (int i = lines - 1; i >= firstLine && lastLine < 0; i--)
+            if (buffer.GetLineSpan(i).IndexOf(Query, Comparison) >= 0)
+                lastLine = i;
+
+        int size = 0;
+        for (int i = firstLine; i <= lastLine; i++)
+            size += buffer.GetLineLength(i) + 1;
+        var sb = new System.Text.StringBuilder(size + size / 8);
+        int count = 0;
+        for (int i = firstLine; i <= lastLine; i++)
+        {
+            if (i > firstLine)
+                sb.Append('\n');
             var span = buffer.GetLineSpan(i);
             int col = 0;
             while (col <= span.Length - _queryLength)
@@ -127,13 +217,14 @@ internal sealed class FindModel
                 int idx = span[col..].IndexOf(Query, Comparison);
                 if (idx < 0)
                     break;
-                total++;
+                sb.Append(span.Slice(col, idx));
+                sb.Append(replacement);
+                count++;
                 col += idx + _queryLength;
             }
+            sb.Append(span[col..]);
         }
-        _matchCount = total;
-        _countVersion = buffer.Version;
-        _countQueryStamp = _queryStamp;
-        return total;
+        text = sb.ToString();
+        return count;
     }
 }

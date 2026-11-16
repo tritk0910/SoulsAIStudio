@@ -194,6 +194,35 @@ public class SpEffectInterruptsTests
         Assert.Equal(3, table.Handlers[1].Line);
         Assert.False(table.Handlers[2].Replans);
         Assert.Equal(6, table.Handlers[2].Line);
+
+        // Cursor line -> arm (combo started from a SpEffect).
+        Assert.Null(SpEffectInterrupts.HandlerAt(table, 1));
+        Assert.Equal(1, SpEffectInterrupts.HandlerAt(table, 3)!.SpEffectId);
+        Assert.Equal(1, SpEffectInterrupts.HandlerAt(table, 5)!.SpEffectId);
+        Assert.Equal(2, SpEffectInterrupts.HandlerAt(table, 6)!.SpEffectId);
+        Assert.Equal(2, SpEffectInterrupts.HandlerAt(table, 9)!.SpEffectId);
+        Assert.Equal(2, SpEffectInterrupts.HandlerAt(table, 10)!.SpEffectId);
+        Assert.Null(SpEffectInterrupts.HandlerAt(table, 13));
+    }
+
+    [RequiresTestDataFact]
+    public void Owl_HandlerAt_EveryArmLine_FindsItsOwnArm()
+    {
+        string src = File.ReadAllText(Samples.OwlBattle);
+        var lines = src.Split('\n');
+        var table = SpEffectInterrupts.Build(src);
+        foreach (var h in table.Handlers.Values)
+        {
+            var found = SpEffectInterrupts.HandlerAt(table, h.Line);
+            Assert.NotNull(found);
+            Assert.Equal(h.Line, found!.Line);
+            Assert.Contains($"== {found.SpEffectId}", lines[h.Line]);
+            Assert.True(h.EndLine >= h.Line);
+        }
+        // Inside 3506000's body (its first step) -> still 3506000.
+        var h35 = table.Handlers[3506000];
+        int firstStep = ComboSequence.Flatten(h35.Body, _ => 0)[0].Line;
+        Assert.Equal(3506000, SpEffectInterrupts.HandlerAt(table, firstStep)!.SpEffectId);
     }
 
     [Fact]

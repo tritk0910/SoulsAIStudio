@@ -55,6 +55,7 @@ public sealed class EditorPalette
     public uint CurrentLineFill, Selection, Cursor, HighlightLine;
     public uint FindMatch, FindMatchCurrent, Error, Warning;
     public uint FieldBackground, FieldBorder, FieldBorderActive;
+    public uint PopupBackground, PopupBorder, PopupSelected, PopupHover, PopupDim;
 
     /// <summary>Dark palette matching docs/ux/ui-spec.md §4.1.</summary>
     public static EditorPalette Dark()
@@ -85,6 +86,11 @@ public sealed class EditorPalette
         p.FieldBackground = Rgb(0x1E1F22);
         p.FieldBorder = Rgb(0x3A3C42);
         p.FieldBorderActive = Rgb(0x4C9AFF);
+        p.PopupBackground = Rgb(0x1E1F22, 250);
+        p.PopupBorder = Rgb(0x45474E);
+        p.PopupSelected = Rgb(0x04395E);
+        p.PopupHover = Rgb(0x2A2D2E);
+        p.PopupDim = Rgb(0x8A8F98);
         return p;
     }
 }

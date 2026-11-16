@@ -261,6 +261,24 @@ internal sealed class EditorCore
 
     public bool ReplaceSelection(string text, bool isTyping = false) => ReplaceRange(SelectionStart, SelectionEnd, text, isTyping);
 
+    /// <summary>
+    /// Replaces every match of <paramref name="find"/>'s query with <paramref name="replacement"/> as ONE undo step
+    /// (a single <see cref="ReplaceRange"/> over the lines from the first to the last match). The cursor stays on
+    /// its line; the selection collapses. Returns the number of replacements.
+    /// </summary>
+    public int ReplaceAll(FindModel find, ReadOnlySpan<char> replacement)
+    {
+        if (ReadOnly)
+            return 0;
+        int n = find.BuildReplaceAll(Buffer, replacement, out int first, out int last, out string text);
+        if (n == 0)
+            return 0;
+        var keep = _cursor;
+        ReplaceRange(new Coordinates(first, 0), new Coordinates(last, Buffer.GetLineLength(last)), text,
+            after: new SelectionState(keep, keep));
+        return n;
+    }
+
     /// <summary>Types one char (or a newline with auto-indent).</summary>
     public bool TypeChar(char c)
     {

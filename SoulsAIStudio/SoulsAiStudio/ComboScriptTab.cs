@@ -242,15 +242,16 @@ namespace SoulsAiStudio.App
             foreach (var (sp, frame, endFrame) in sps)
             {
                 var h = _handlerFor(sp);
-                string label = $"SpEffect {sp}   f{frame:0}–{endFrame:0}" + (h != null ? (h.DependsOnDistance ? "   [Interrupt, distance]" : "   [Interrupt]") : "");
+                string label = $"SpEffect {_app.SpEffectText(sp)}   f{frame:0}–{endFrame:0}" + (h != null ? (h.DependsOnDistance ? "   [Interrupt, distance]" : "   [Interrupt]") : "");
                 if (h != null) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
                 bool click = ImGui.Selectable(label + $"##s{k++}", false);
                 if (h != null) ImGui.PopStyleColor();
+                _app.SpEffectLabelContextMenu($"##s_ctx{k}", sp);
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(h == null ? "Goal.Interrupt of the open script has no branch for this SpEffect"
+                    ImGui.SetTooltip((h == null ? "Goal.Interrupt of the open script has no branch for this SpEffect"
                         : $"Goal.Interrupt line {h.Line + 1}: if {h.Condition}" + (ComboSequence.ContainsClear(h.Body) ? "\nClearSubGoal, then: " : "\nthen: ")
                           + string.Join(" → ", ComboSequence.Flatten(h.Body, _ => 0).Select(x => x.AnimId))
-                          + (endFrame - frame >= 2 ? $"\n\nActive f{frame:0}–{endFrame:0}: click inserts SpEffect {sp} (cut at f{frame:0});\nwrite SpEffect {sp}@<frame> to cut later in that window." : ""));
+                          + (endFrame - frame >= 2 ? $"\n\nActive f{frame:0}–{endFrame:0}: click inserts SpEffect {sp} (cut at f{frame:0});\nwrite SpEffect {sp}@<frame> to cut later in that window." : "")) + "\nRight-click: set a label for this SpEffect");
                 if (click) ApplyCut($"{ComboScript.SpEffectKeyword} {sp}");
             }
             if (ImGui.Selectable($"NoCancel   (play to the end)##nc")) ApplyCut("NoCancel");
@@ -304,7 +305,7 @@ namespace SoulsAiStudio.App
                     if (chain.Count == 0) continue;
                     var sb = new System.Text.StringBuilder();
                     sb.Append($"# SpEffect interrupt, from your files:\n");
-                    sb.Append($"# {anim} has a SpEffect {sp} event at frame {frame:0}. Goal.Interrupt (line {h.Line + 1}) handles it")
+                    sb.Append($"# {anim} has a SpEffect {_app.SpEffectText(sp)} event at frame {frame:0}. Goal.Interrupt (line {h.Line + 1}) handles it")
                       .Append(ComboSequence.ContainsClear(h.Body) ? " with ClearSubGoal + a new combo,\n" : " with a new combo,\n");
                     sb.Append($"# so {anim} is cut at frame {frame:0} and {string.Join(" → ", chain)} plays next.\n");
                     sb.Append($"EnemyComboAtk {anim}\n");

@@ -35,6 +35,7 @@ namespace SoulsAiStudio.App
         private readonly ComboPanel _combo;
         private readonly LuabndToolsPanel _luabnd;
         private readonly EventFinderPanel _finder;
+        private readonly SpEffectLabelsWindow _spLabels;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -48,8 +49,11 @@ namespace SoulsAiStudio.App
             _combo = new ComboPanel(this, _editor);
             _luabnd = new LuabndToolsPanel(this);
             _finder = new EventFinderPanel(this);
+            _spLabels = new SpEffectLabelsWindow(this);
+            Bridge.FormatSpEffect = SpEffectText;
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
-            _lighting = new ViewportLightingStore(Settings);
+            DSAnimStudio.zzz_NotificationManagerIns.HideNotificationPopups = Settings.HideNotificationPopups;
+            _lighting =new ViewportLightingStore(Settings);
             _lighting.Restore(); // the user's own Toolbox values win over the preset
 
             // "--sas-project <file.sasproj>" (or a bare .sasproj path, e.g. from a file association) opens it on launch.
@@ -183,15 +187,25 @@ namespace SoulsAiStudio.App
                     if (files != null && !IsCharacterLoaded(files)) LoadCharacterId(id);
                 }
                 Layout.ApplyIfNeeded(Settings);
-                if (Layout.FocusEditorTabFrames > 0) { ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
+                if (Layout.FocusEditorTabFrames > 0) { if (!Layout.EditorOutsideGraphNode) ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
                 focused |= _scripts.Build();
                 focused |= _editor.Build();
                 focused |= _combo.Build();
                 focused |= _luabnd.Build();
             }
             focused |= _finder.Build(); // works with any loaded character, project or not
-            SasHooks.GraphHidden = Session != null && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId;
+            focused |= _spLabels.Build();
+            bool inProject = Session != null;
+            Layout.ProbeWindows(new[]
+            {
+                (SasLayout.ScriptsWindow, inProject && _scripts.IsOpen), (SasLayout.EditorWindow, inProject && _editor.IsOpen),
+                (ComboPanel.WindowName, inProject && _combo.IsOpen), (LuabndToolsPanel.WindowName, inProject && _luabnd.IsOpen),
+                (EventFinderPanel.WindowName, _finder.IsOpen), (SpEffectLabelsWindow.WindowName, _spLabels.IsOpen),
+            });
+            SasHooks.GraphHidden = !Layout.GraphVisible || Layout.WindowNestedInGraph
+                                   || (inProject && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId);
             BuildErrorPopup();
+            ImeGuard.SetImGuiTextFieldActive(DSAnimStudio.Main.WinForm?.Handle ?? IntPtr.Zero, ImGui.GetIO().WantTextInput);
             if (SasInputProbe.Enabled) (_probe ??= new SasInputProbe()).Draw(focused);
             // While any of our windows has focus, DSAS's TAE shortcuts must not fire (CLAUDE.md §6 key routing).
             if (focused) anyFieldFocused = true;
@@ -221,6 +235,8 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
+            if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)...", "", false, Session != null)) _luabnd.Open();
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Unpack a map's .luabnd.dcx into a WitchyBND folder, or repack a Witchy/Yabber folder into the mod's .luabnd.dcx,\n" +
@@ -229,9 +245,16 @@ namespace SoulsAiStudio.App
             if (ImGui.BeginMenu("Layout", Session != null))
             {
                 if (ImGui.MenuItem("AI (Lua Editor)", "", CurrentLayout == WorkspaceLayout.Ai)) SetLayout(WorkspaceLayout.Ai);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor shown as a tab next to Graph.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor shown (as a tab next to Graph, or beside it: see below).");
                 if (ImGui.MenuItem("Animation", "", CurrentLayout == WorkspaceLayout.Animation)) SetLayout(WorkspaceLayout.Animation);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor hidden so the Graph (TAE timeline) stays visible. Default for animations-only projects.");
+                ImGui.Separator();
+                if (ImGui.MenuItem("Graph | Lua Editor side by side", "", Settings.EditorBesideGraph)) SetEditorPlacement(true);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Split the Graph's panel 50/50: Graph on the left, Lua Editor on the right.");
+                if (ImGui.MenuItem("Lua Editor as tab next to Graph", "", !Settings.EditorBesideGraph)) SetEditorPlacement(false);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor and Graph share one panel; click the tabs to switch.");
+                if (ImGui.MenuItem("Reset Panel Layout##sas_layout_reset")) ResetPanelLayout();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Put the Souls AI panels back in their default places (keeps the Lua Editor placement above). Panels can also be dragged anywhere by their tab.");
                 ImGui.EndMenu();
             }
             if (ImGui.MenuItem("Project Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
@@ -260,12 +283,7 @@ namespace SoulsAiStudio.App
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("On: during a TAE Blend the character's movement mixes the previous and the new anim by blend weight.\n" +
                                  "Off (DSAS 5.0): movement follows only the new anim, so it can stop or jump when a blend starts.");
-            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null))
-            {
-                _scripts.IsOpen = _combo.IsOpen = true;
-                ApplyLayout(CurrentLayout);
-                Layout.RequestApply();
-            }
+            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) ResetPanelLayout();
             ImGui.EndMenu();
         }
 
@@ -352,6 +370,22 @@ namespace SoulsAiStudio.App
             _editor.IsOpen = layout == WorkspaceLayout.Ai;
             if (layout == WorkspaceLayout.Ai) Layout.FocusEditorTabFrames = 10;
             else Layout.FocusEditorTabFrames = 0;
+        }
+
+        private void ResetPanelLayout()
+        {
+            _scripts.IsOpen = _combo.IsOpen = true;
+            ApplyLayout(CurrentLayout);
+            Layout.RequestApply();
+        }
+
+        /// <summary>Lua Editor beside the Graph (50/50) or as a tab in its node; saved in settings and applied now.</summary>
+        private void SetEditorPlacement(bool besideGraph)
+        {
+            Settings.EditorBesideGraph = besideGraph;
+            Settings.Save();
+            if (CurrentLayout != WorkspaceLayout.Ai) SetLayout(WorkspaceLayout.Ai); // the Animation layout hides the editor
+            Layout.RequestEditorPlacement(besideGraph);
         }
 
         /// <summary>Opens an AI script in the editor (switches to the AI layout if the editor was hidden).</summary>
@@ -538,6 +572,24 @@ namespace SoulsAiStudio.App
                 if (!File.Exists(bak)) File.Copy(path, bak);
             }
         }
+
+        // ---------- SpEffect labels ----------
+
+        /// <summary>User SpEffect names (<c>spEffectLabels.json</c> in the user data folder, shared by all projects).</summary>
+        public SoulsAiStudio.Core.Params.SpEffectLabels SpEffectLabels { get; } =
+            SoulsAiStudio.Core.Params.SpEffectLabels.Load(Path.Combine(SasSettings.UserDataDir, "spEffectLabels.json"));
+
+        /// <summary>Name of a SpEffect: the user's label, else the SpEffectParam row name, else null.</summary>
+        public string? SpEffectDisplayName(int id) => SpEffectLabels.Get(id) ?? Bridge.SpEffectName(id);
+
+        /// <summary>"200210 Strong parry (right)", or just "200210" when the SpEffect has no name.</summary>
+        public string SpEffectText(int id) => SpEffectDisplayName(id) is { } n ? $"{id} {n}" : id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>Right-click menu on the last drawn item: set/remove the label of SpEffect <paramref name="id"/>.</summary>
+        public void SpEffectLabelContextMenu(string strId, int id) => _spLabels.ContextMenu(strId, id);
+
+        /// <summary>The same menu items, inside a popup/menu the caller already opened.</summary>
+        public void SpEffectLabelMenuItems(int id) => _spLabels.ContextMenuItems(id);
 
         // ---------- notifications / errors ----------
 

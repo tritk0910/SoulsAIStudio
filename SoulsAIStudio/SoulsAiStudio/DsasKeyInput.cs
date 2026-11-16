@@ -11,7 +11,7 @@ namespace SoulsAiStudio.App
     /// <list type="bullet">
     /// <item>Typed characters come from the game form's <c>KeyPress</c> (WM_CHAR). Reading ImGui's
     /// <c>io.InputQueueCharacters</c> returned nothing in DSAS (ImGui.NET 1.87.3 managed vs 1.88 native struct layout).</item>
-    /// <item>Modifiers and F/G/F3/S come from MonoGame polling (DSAS never forwards F/G/F3 to ImGui).</item>
+    /// <item>Modifiers and F/G/H/F3/S/Space come from MonoGame polling (DSAS never forwards F/G/H/F3/Space to ImGui).</item>
     /// <item>Navigation/editing keys still use ImGui's key state (<c>ImGui.IsKeyPressed</c>, with auto-repeat).</item>
     /// </list>
     /// Call <see cref="NewFrame"/> once per frame before rendering editors.
@@ -58,6 +58,8 @@ namespace SoulsAiStudio.App
             EditorKey.F => Edge(Keys.F),
             EditorKey.G => Edge(Keys.G),
             EditorKey.F3 => Edge(Keys.F3),
+            EditorKey.H => Edge(Keys.H),
+            EditorKey.Space => Edge(Keys.Space),
             _ => base.IsPressed(key),
         };
 
@@ -81,9 +83,29 @@ namespace SoulsAiStudio.App
         private static IntPtr _saved;
         private static bool _disabled;
 
+        private static bool _editorWantsOff;
+        private static bool _textFieldWantsOff;
+
         public static void SetEditorFocused(IntPtr hwnd, bool focused, bool allowIme)
         {
-            bool wantDisabled = focused && !allowIme;
+            _editorWantsOff = focused && !allowIme;
+            Apply(hwnd);
+        }
+
+        /// <summary>
+        /// Any ImGui text field is active (io.WantTextInput). DSAS feeds ImGui from WinForms KeyPress, which fires for both
+        /// WM_IME_CHAR and WM_CHAR, so with a Windows IME (e.g. Vietnamese Telex) every word was inserted twice and late.
+        /// Off while typing in a field, like in the Lua editor; tools such as Unikey still work.
+        /// </summary>
+        public static void SetImGuiTextFieldActive(IntPtr hwnd, bool active)
+        {
+            _textFieldWantsOff = active;
+            Apply(hwnd);
+        }
+
+        private static void Apply(IntPtr hwnd)
+        {
+            bool wantDisabled = _editorWantsOff || _textFieldWantsOff;
             if (wantDisabled == _disabled || hwnd == IntPtr.Zero) return;
             if (wantDisabled) _saved = ImmAssociateContext(hwnd, IntPtr.Zero);
             else ImmAssociateContext(hwnd, _saved);

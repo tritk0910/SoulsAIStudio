@@ -4371,7 +4371,7 @@ namespace DSAnimStudio.TaeEditor
                 //{
                 //    HoveringOverEventBox = null;
                 //}
-                if ((Graph?.Rect.Contains(Input.MousePosition) ?? false) && !SoulsAiStudio.App.SasHooks.GraphHidden) // [SAS] Lua editor tab covers the graph
+                if ((Graph?.Rect.Contains(Input.MousePosition) ?? false) && SoulsAiStudio.App.SasHooks.GraphTakesMouse) // [SAS] not when Graph is a hidden tab or one of our windows is under the mouse
                 {
                     Graph?.Update(elapsedTime);
                 }
@@ -4471,6 +4471,7 @@ namespace DSAnimStudio.TaeEditor
             {
                 try
                 {
+                    SoulsAiStudio.App.SasHooks.RefreshGraphRect(Graph); // [SAS] follow the Graph window size even when Update was skipped (our panel focused)
                     Graph.Draw(gd, sb, boxTex, font, elapsedSeconds, smallFont, scrollbarArrowTex);
                 }
                 catch

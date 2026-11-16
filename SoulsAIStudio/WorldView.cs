@@ -760,9 +760,10 @@ namespace DSAnimStudio
             float heightOrWidth = MathF.Max(height, diameter);
             float minDistToFitInView = heightOrWidth / (2f * MathF.Tan(MathHelper.ToRadians(43) / 2f));
             float y = (height / 2) + posYOffset;
-            float z = minDistToFitInView + (diameter / 2);
+            float z = SoulsAiStudio.App.SasHooks.StartCameraDistance(minDistToFitInView + (diameter / 2)); // [SAS] start zoomed out a bit
             var offset = new Vector3(0, y, -z);
             SetOrbitCamStartOffsetNew(Math.Abs(offset.Z), offset.Y);
+            RequestRecenter = true; // [SAS] start at the middle-click recenter view (pivot at the chest dummy poly, level)
         }
 
         public void SetOrbitCamStartOffsetNew(float dist, float height)

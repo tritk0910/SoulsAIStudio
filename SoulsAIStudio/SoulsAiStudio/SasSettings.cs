@@ -18,8 +18,15 @@ namespace SoulsAiStudio.App
         public bool ShowStartScreenOnLaunch { get; set; } = true;
         /// <summary>Version of the default dock layout already applied (see <see cref="SasLayout"/>).</summary>
         public int LayoutVersion { get; set; }
+        /// <summary>
+        /// Lua Editor placement chosen in Souls AI > Layout: true = beside the Graph (its node split 50/50, Graph left),
+        /// false = a tab in the Graph's node. Applied when chosen, on Reset Panel Layout and on start (see SasLayout).
+        /// </summary>
+        public bool EditorBesideGraph { get; set; }
         /// <summary>Keep the Windows IME active in the Lua editor (default off: its composition text isn't drawn).</summary>
         public bool AllowImeInEditor { get; set; }
+        /// <summary>DSAS Log window's "Hide Popup Notifications" (DSAS keeps it only in memory). See SasHooks.HideNotificationPopupsChanged.</summary>
+        public bool HideNotificationPopups { get; set; }
 
         /// <summary>DSAS sound volume in percent (0–200), restored on launch and for every loaded character.</summary>
         public float SoundVolume { get; set; } = 100;

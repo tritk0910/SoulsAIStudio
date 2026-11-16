@@ -2,6 +2,7 @@
 // Input/Standard*Input.cs — see THIRD_PARTY_ImGuiColorTextEditNet.md.
 using System.Numerics;
 using ImGuiNET;
+using SoulsAiStudio.Editor.Completion;
 using SoulsAiStudio.Editor.Input;
 using SoulsAiStudio.Editor.Rendering;
 using SoulsAiStudio.Editor.Syntax;
@@ -20,7 +21,7 @@ public sealed class LuaCodeEditor
     /// <summary>Lines (re)colorized per frame at most. A 3000-line file colors fully in the first frame.</summary>
     const int ColorizeBudgetPerFrame = 8000;
 
-    internal enum FocusTarget { Text, Find, Goto }
+    internal enum FocusTarget { Text, Find, Replace, Goto }
 
     readonly EditorCore _core = new();
     readonly DiagnosticStore _diagnostics = new();
@@ -33,6 +34,8 @@ public sealed class LuaCodeEditor
     readonly char[] _typed = new char[256];
     readonly LineInput _findField = new(256);
     readonly LineInput _gotoField = new(9, digitsOnly: true);
+    readonly LineInput _replaceField = new(256);
+    readonly CompletionController _completion;
 
     int _highlightLine = -1;
     int _scrollCenterLine = -1;
@@ -53,7 +56,15 @@ public sealed class LuaCodeEditor
     Coordinates _findOrigin;
     int _findFieldSeenVersion = -1;
     bool _gotoOpen;
+    bool _replaceOpen;
+    int _replaceStatusCount = -1; // "Replaced N" shown until the text changes again
+    long _replaceStatusVersion = -1;
     bool _focusTextNextFrame;
+
+    // completion popup geometry from the last draw (for mouse hits before this frame's draw)
+    bool _popupDrawn;
+    Vector2 _popupMin, _popupMax;
+    float _popupRowH;
 
     long _widthVersion = -1;
     float _maxLineWidth;
@@ -64,6 +75,10 @@ public sealed class LuaCodeEditor
         _diagnostics.Attach(_core.Buffer);
         _colorizer = new Colorizer(_core.Buffer);
         _view = new EditorView(_core, _diagnostics, _find);
+        _completion = new CompletionController(_core)
+        {
+            LineStartState = line => line > 0 && line - 1 < _core.Buffer.LineCount ? _colorizer.EndState(line - 1) : LuaLexState.Normal,
+        };
     }
 
     // ================================================================= public API
@@ -76,6 +91,7 @@ public sealed class LuaCodeEditor
         set
         {
             _core.SetText(value);
+            _completion.Close();
             _mouseSelecting = false;
             _scrollCenterLine = 0;
             _lastVersion = _core.Buffer.Version;
@@ -125,8 +141,28 @@ public sealed class LuaCodeEditor
     /// <summary>Highlights one line (e.g. current goal header); null clears.</summary>
     public void SetHighlightLine(int? line) => _highlightLine = line ?? -1;
 
+    /// <summary>
+    /// Replaces [start, end) (0-based line/column) with <paramref name="text"/> as one undo step, for edits made from
+    /// outside the editor (e.g. the act weight table). The cursor stays on its line when <paramref name="keepCursor"/>.
+    /// Raises <see cref="TextChanged"/>. Returns false when read-only or nothing changed.
+    /// </summary>
+    public bool ApplyEdit(int startLine, int startColumn, int endLine, int endColumn, string text, bool keepCursor = true)
+    {
+        _completion.Close();
+        long v = Version;
+        var keep = _core.Cursor;
+        var after = keepCursor ? new SelectionState(keep, keep) : (SelectionState?)null;
+        bool ok = _core.ReplaceRange(new Coordinates(startLine, startColumn), new Coordinates(endLine, endColumn), text, after: after);
+        if (ok && keepCursor) _core.ScrollToCursorRequested = false;
+        if (v != Version)
+            TextChanged?.Invoke();
+        _lastVersion = Version;
+        return ok;
+    }
+
     public void Undo()
     {
+        _completion.Close();
         long v = Version;
         _core.DoUndo();
         if (v != Version)
@@ -136,6 +172,7 @@ public sealed class LuaCodeEditor
 
     public void Redo()
     {
+        _completion.Close();
         long v = Version;
         _core.DoRedo();
         if (v != Version)
@@ -163,6 +200,28 @@ public sealed class LuaCodeEditor
     {
         get => _core.TabSize;
         set => _core.TabSize = Math.Clamp(value, 1, 16);
+    }
+
+    /// <summary>
+    /// Extra completion items (other open scripts, game API seeds). The editor itself always offers Lua keywords,
+    /// builtins and the identifiers of its own buffer. See <see cref="WorkspaceCompletionProvider"/>.
+    /// </summary>
+    public ICompletionProvider? CompletionProvider
+    {
+        get => _completion.Provider;
+        set => _completion.Provider = value;
+    }
+
+    /// <summary>Enables the suggestion popup (automatic and Ctrl+Space). Default true.</summary>
+    public bool AutoCompleteEnabled
+    {
+        get => _completion.Enabled;
+        set
+        {
+            _completion.Enabled = value;
+            if (!value)
+                _completion.Close();
+        }
     }
 
     /// <summary>
@@ -235,34 +294,67 @@ public sealed class LuaCodeEditor
         if (_enterCooldown > 0)
             _enterCooldown--;
         if (!editorFocused)
+        {
+            _completion.Close();
             return;
+        }
 
         bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
         var chars = _typed.AsSpan(0, n);
 
-        // Ctrl+F / Ctrl+G switch the target; chars typed later in the same frame (fast typists, SendKeys)
+        // Ctrl+F / Ctrl+H / Ctrl+G switch the target; chars typed later in the same frame (fast typists, SendKeys)
         // continue into the newly opened field instead of being dropped.
         if (ctrl && !alt && k.IsPressed(EditorKey.F))
-            OpenFind();
+            OpenFind(replace: false);
+        else if (ctrl && !alt && k.IsPressed(EditorKey.H))
+            OpenFind(replace: true);
         else if (ctrl && !alt && k.IsPressed(EditorKey.G))
             OpenGoto();
         if (k.IsPressed(EditorKey.F3))
             FindStep(!shift);
-        if (k.IsPressed(EditorKey.Escape) && (_findOpen || _gotoOpen))
+        if (k.IsPressed(EditorKey.Escape))
         {
-            CloseBars();
-            return;
+            if (_target == FocusTarget.Text && _completion.IsOpen)
+                _completion.Close(); // Escape closes the popup first, the bars on the next press
+            else if (_findOpen || _gotoOpen)
+            {
+                CloseBars();
+                return;
+            }
         }
 
-        if (_target == FocusTarget.Find && !_findOpen || _target == FocusTarget.Goto && !_gotoOpen)
+        if ((_target == FocusTarget.Find || _target == FocusTarget.Replace) && !_findOpen || _target == FocusTarget.Goto && !_gotoOpen)
             _target = FocusTarget.Text;
+        if (_target == FocusTarget.Replace && !_replaceOpen)
+            _target = FocusTarget.Find;
 
         switch (_target)
         {
             case FocusTarget.Find:
+                if (_replaceOpen && !ctrl && k.IsPressed(EditorKey.Tab))
+                {
+                    _target = FocusTarget.Replace; // Tab: find field -> replace field
+                    break;
+                }
                 if (FeedField(_findField, k, chars, enterCooling))
                     FindStep(!shift);
                 SyncFindQuery();
+                break;
+
+            case FocusTarget.Replace:
+                if (!ctrl && k.IsPressed(EditorKey.Tab))
+                {
+                    _target = FocusTarget.Find; // Tab / Shift+Tab: back to the find field
+                    break;
+                }
+                // Enter = replace and go to the next match; Ctrl+Enter = replace all
+                if (FeedField(_replaceField, k, chars, enterCooling, allowCtrlEnter: true))
+                {
+                    if (ctrl)
+                        ReplaceAll();
+                    else
+                        ReplaceOne();
+                }
                 break;
 
             case FocusTarget.Goto:
@@ -281,6 +373,8 @@ public sealed class LuaCodeEditor
             default:
                 if (textFocused)
                     HandleTextKeys(k, chars, pageLines, enterCooling);
+                else
+                    _completion.Close();
                 break;
         }
     }
@@ -290,7 +384,7 @@ public sealed class LuaCodeEditor
     /// (hosts that poll key state can miss a short Enter press, but WM_CHAR CR still arrives). One Enter per
     /// frame; the other source is then ignored for a few frames so it can't fire twice.
     /// </summary>
-    bool FeedField(LineInput field, IKeyInput k, ReadOnlySpan<char> chars, bool enterCooling)
+    bool FeedField(LineInput field, IKeyInput k, ReadOnlySpan<char> chars, bool enterCooling, bool allowCtrlEnter = false)
     {
         bool ctrl = k.Ctrl, alt = k.Alt;
         if (ctrl && !alt)
@@ -326,7 +420,7 @@ public sealed class LuaCodeEditor
             field.Insert(c); // other control chars are ignored by the field
         }
 
-        bool enterKey = !ctrl && k.IsPressed(EditorKey.Enter);
+        bool enterKey = (!ctrl || allowCtrlEnter) && k.IsPressed(EditorKey.Enter);
         if (!enterChar && !enterKey)
             return false;
         // One physical press can show up as key AND typed CR, possibly a frame apart. While cooling down,
@@ -342,43 +436,79 @@ public sealed class LuaCodeEditor
     void HandleTextKeys(IKeyInput k, ReadOnlySpan<char> chars, int pageLines, bool enterCooling)
     {
         bool ctrl = k.Ctrl, shift = k.Shift, alt = k.Alt;
+        bool ctrlSpace = ctrl && !alt && k.IsPressed(EditorKey.Space);
 
         if (ctrl && !alt)
         {
-            if (k.IsPressed(EditorKey.Z)) { if (shift) _core.DoRedo(); else _core.DoUndo(); }
-            else if (k.IsPressed(EditorKey.Y)) _core.DoRedo();
+            if (k.IsPressed(EditorKey.Z)) { _completion.Close(); if (shift) _core.DoRedo(); else _core.DoUndo(); }
+            else if (k.IsPressed(EditorKey.Y)) { _completion.Close(); _core.DoRedo(); }
             else if (k.IsPressed(EditorKey.A)) _core.SelectAll();
             else if (k.IsPressed(EditorKey.C)) _core.Copy();
-            else if (k.IsPressed(EditorKey.X)) _core.Cut();
-            else if (k.IsPressed(EditorKey.V)) _core.Paste();
+            else if (k.IsPressed(EditorKey.X)) { _completion.Close(); _core.Cut(); }
+            else if (k.IsPressed(EditorKey.V)) { _completion.Close(); _core.Paste(); }
         }
 
         if (!alt)
         {
+            // While the popup is open it owns Up/Down/PageUp/PageDown and accepts with Enter/Tab.
+            // With the popup closed these keys behave exactly as before (never stolen).
+            bool popupKeys = _completion.IsOpen && !ctrl;
+            if (popupKeys && k.IsPressed(EditorKey.Up)) _completion.Move(-1);
+            else if (k.IsPressed(EditorKey.Up)) _core.MoveUp(1, shift);
+            if (popupKeys && k.IsPressed(EditorKey.Down)) _completion.Move(1);
+            else if (k.IsPressed(EditorKey.Down)) _core.MoveDown(1, shift);
+            if (popupKeys && k.IsPressed(EditorKey.PageUp)) _completion.Move(-CompletionController.MaxVisible);
+            else if (k.IsPressed(EditorKey.PageUp)) _core.MoveUp(pageLines, shift);
+            if (popupKeys && k.IsPressed(EditorKey.PageDown)) _completion.Move(CompletionController.MaxVisible);
+            else if (k.IsPressed(EditorKey.PageDown)) _core.MoveDown(pageLines, shift);
+
             if (k.IsPressed(EditorKey.Left)) _core.MoveLeft(shift, ctrl);
             if (k.IsPressed(EditorKey.Right)) _core.MoveRight(shift, ctrl);
-            if (k.IsPressed(EditorKey.Up)) _core.MoveUp(1, shift);
-            if (k.IsPressed(EditorKey.Down)) _core.MoveDown(1, shift);
-            if (k.IsPressed(EditorKey.PageUp)) _core.MoveUp(pageLines, shift);
-            if (k.IsPressed(EditorKey.PageDown)) _core.MoveDown(pageLines, shift);
             if (k.IsPressed(EditorKey.Home)) { if (ctrl) _core.MoveToStartOfFile(shift); else _core.MoveHome(shift); }
             if (k.IsPressed(EditorKey.End)) { if (ctrl) _core.MoveToEndOfFile(shift); else _core.MoveEnd(shift); }
             if (k.IsPressed(EditorKey.Backspace)) _core.Backspace(ctrl);
             if (k.IsPressed(EditorKey.Delete)) _core.Delete(ctrl);
-            if (!ctrl && !(enterCooling && _lastEnterWasChar) && k.IsPressed(EditorKey.Enter)) _core.TypeChar('\n');
-            if (!ctrl && k.IsPressed(EditorKey.Tab)) _core.Tab(shift);
+
+            bool enter = !ctrl && !(enterCooling && _lastEnterWasChar) && k.IsPressed(EditorKey.Enter);
+            bool tab = !ctrl && k.IsPressed(EditorKey.Tab);
+            if (popupKeys && _completion.IsOpen && (enter || tab && !shift))
+                _completion.Accept();
+            else
+            {
+                if (enter) _core.TypeChar('\n');
+                if (tab) _core.Tab(shift);
+            }
         }
 
         // Printable chars only come from keys typed without Ctrl (see FeedField), so no Ctrl gating here.
+        // Ctrl+Space also arrives as a typed ' ': drop it.
+        bool typed = false;
         foreach (var c in chars)
-            if (c >= 32 && c != 127)
-                _core.TypeChar(c);
+        {
+            if (c < 32 || c == 127 || ctrlSpace && c == ' ')
+                continue;
+            _core.TypeChar(c);
+            typed = true;
+        }
+
+        if (ctrlSpace)
+            _completion.OpenExplicit();
+        else if (typed)
+            _completion.OnTyped();
+        else if (_completion.IsOpen)
+            _completion.Update(); // cursor moved / Backspace: refilter or close
     }
 
-    void OpenFind()
+    void OpenFind(bool replace)
     {
+        _completion.Close();
+        bool wasInBar = _findOpen && (_target == FocusTarget.Find || _target == FocusTarget.Replace);
         _findOpen = true;
         _gotoOpen = false;
+        if (replace)
+            _replaceOpen = true;
+        else if (!wasInBar)
+            _replaceOpen = false; // Ctrl+F from the code shows the plain find bar
         _target = FocusTarget.Find;
         _findOrigin = _core.SelectionStart;
         if (_core.HasSelection && _core.SelectionStart.Line == _core.SelectionEnd.Line)
@@ -389,6 +519,7 @@ public sealed class LuaCodeEditor
 
     void OpenGoto()
     {
+        _completion.Close();
         _gotoOpen = true;
         _findOpen = false;
         _target = FocusTarget.Goto;
@@ -425,6 +556,31 @@ public sealed class LuaCodeEditor
             _core.Select(s, e);
     }
 
+    /// <summary>Replaces the current match (if the selection is one) and selects the next match.</summary>
+    void ReplaceOne()
+    {
+        SyncFindQuery();
+        if (!_find.HasQuery || _core.ReadOnly)
+            return;
+        if (_find.IsMatchAt(_core.Buffer, _core.SelectionStart, _core.SelectionEnd))
+            _core.ReplaceSelection(new string(_replaceField.Text));
+        // search from the end of the replacement, so the inserted text is never matched again
+        if (_find.FindNext(_core.Buffer, _core.SelectionEnd, out var s, out var e))
+            _core.Select(s, e);
+    }
+
+    /// <summary>Replaces every match as one undo step. Returns the number of replacements.</summary>
+    int ReplaceAll()
+    {
+        SyncFindQuery();
+        if (!_find.HasQuery || _core.ReadOnly)
+            return 0;
+        int n = _core.ReplaceAll(_find, _replaceField.Text);
+        _replaceStatusCount = n;
+        _replaceStatusVersion = _core.Buffer.Version;
+        return n;
+    }
+
     // ================================================================= text area
 
     void DrawTextArea()
@@ -457,7 +613,8 @@ public sealed class LuaCodeEditor
             CurrentMatchEnd = _core.SelectionEnd,
         };
 
-        HandleMouse(in f);
+        if (!HandlePopupMouse())
+            HandleMouse(in f);
 
         _colorizer.Run(ColorizeBudgetPerFrame);
 
@@ -485,6 +642,9 @@ public sealed class LuaCodeEditor
 
         _sink.Begin(ImGui.GetWindowDrawList());
         _view.Draw(_sink, m, in f);
+        if (_completion.IsOpen)
+            _completion.Update(); // picks up the background buffer scan
+        DrawCompletionPopup(in f);
 
         // content size for scrollbars
         if (_widthVersion != Version)
@@ -586,6 +746,7 @@ public sealed class LuaCodeEditor
         if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             _target = FocusTarget.Text;
+            _completion.Close();
             var pos = _view.ScreenToCoordinates(mouse, in f, _metrics);
             if (mouse.X < gutterRight)
             {
@@ -669,10 +830,22 @@ public sealed class LuaCodeEditor
 
     void DrawFindBar()
     {
+        // row 1: [>] Find [field] < > Aa  "3 of 17"  x
+        if (ImGui.Button(_replaceOpen ? "v##togglereplace" : ">##togglereplace"))
+        {
+            _replaceOpen = !_replaceOpen;
+            if (!_replaceOpen && _target == FocusTarget.Replace)
+                _target = FocusTarget.Find;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Toggle Replace (Ctrl+H)");
+        ImGui.SameLine();
+        float labelX = ImGui.GetCursorPosX();
+        float labelW = ImGui.CalcTextSize("Replace").X + ImGui.GetStyle().ItemSpacing.X;
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Find");
-        ImGui.SameLine();
-        float w = MathF.Min(260, MathF.Max(80, ImGui.GetContentRegionAvail().X - 260));
+        ImGui.SameLine(labelX + labelW);
+        float w = MathF.Min(260, MathF.Max(80, ImGui.GetContentRegionAvail().X - 300));
         if (DrawField("##findfield", _findField, w, _target == FocusTarget.Find))
             _target = FocusTarget.Find;
 
@@ -687,27 +860,197 @@ public sealed class LuaCodeEditor
             _find.SetQuery(_findField.Text, _caseSensitive);
         ImGui.SameLine();
 
-        Span<char> label = stackalloc char[32];
-        int count = _find.CountMatches(_core.Buffer);
-        int len;
-        if (!_find.HasQuery)
-            len = 0;
-        else if (count == 0)
-        {
-            "No results".AsSpan().CopyTo(label);
-            len = 10;
-        }
-        else
-        {
-            count.TryFormat(label, out len);
-            var suffix = count == 1 ? " match" : " matches";
-            suffix.AsSpan().CopyTo(label[len..]);
-            len += suffix.Length;
-        }
+        Span<char> label = stackalloc char[48];
+        int len = FormatMatchStatus(label);
         _sink.TextUnformatted(label[..len]);
         ImGui.SameLine();
         if (ImGui.Button("x##closefind"))
             CloseBars();
+
+        if (!_replaceOpen)
+            return;
+
+        // row 2:      Replace [field] [Replace] [Replace All]
+        ImGui.SetCursorPosX(labelX);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("Replace");
+        ImGui.SameLine(labelX + labelW);
+        if (DrawField("##replacefield", _replaceField, w, _target == FocusTarget.Replace))
+            _target = FocusTarget.Replace;
+        ImGui.SameLine();
+        bool canReplace = _find.HasQuery && !_core.ReadOnly;
+        if (!canReplace)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Replace##one"))
+            ReplaceOne();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Replace this match and go to the next (Enter in the replace field)");
+        ImGui.SameLine();
+        if (ImGui.Button("Replace All##all"))
+            ReplaceAll();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Replace every match, one undo step (Ctrl+Enter in the replace field)");
+        if (!canReplace)
+            ImGui.EndDisabled();
+    }
+
+    /// <summary>"3 of 17", "- of 17" (selection not on a match), "No results", "Replaced 5"; empty without a query. No allocation.</summary>
+    internal int FormatMatchStatus(Span<char> label)
+    {
+        if (_replaceStatusCount >= 0 && _replaceStatusVersion == _core.Buffer.Version)
+            return Concat(label, "Replaced ", _replaceStatusCount, _replaceStatusCount == 1 ? " match" : " matches");
+        if (!_find.HasQuery)
+            return 0;
+        int count = _find.CountMatches(_core.Buffer);
+        if (count == 0)
+        {
+            "No results".AsSpan().CopyTo(label);
+            return 10;
+        }
+        int index = _find.MatchIndex(_core.Buffer, _core.SelectionStart, _core.SelectionEnd);
+        int len;
+        if (index > 0)
+            index.TryFormat(label, out len);
+        else
+        {
+            label[0] = '-';
+            len = 1;
+        }
+        " of ".AsSpan().CopyTo(label[len..]);
+        len += 4;
+        count.TryFormat(label[len..], out int w);
+        return len + w;
+    }
+
+    static int Concat(Span<char> dst, string a, int n, string b)
+    {
+        a.AsSpan().CopyTo(dst);
+        n.TryFormat(dst[a.Length..], out int w);
+        b.AsSpan().CopyTo(dst[(a.Length + w)..]);
+        return a.Length + w + b.Length;
+    }
+
+    // ================================================================= completion popup
+
+    static LuaTokenKind KindColor(CompletionKind k) => k switch
+    {
+        CompletionKind.Keyword => LuaTokenKind.Keyword,
+        CompletionKind.Constant => LuaTokenKind.Constant,
+        CompletionKind.Function or CompletionKind.Method or CompletionKind.Builtin => LuaTokenKind.Function,
+        _ => LuaTokenKind.Identifier,
+    };
+
+    float TextWidth(ReadOnlySpan<char> s)
+    {
+        float w = 0;
+        foreach (var c in s)
+            w += _metrics.Advance(c);
+        return w;
+    }
+
+    /// <summary>Draws the suggestion list under (or above) the typed word. Only the visible rows are measured/drawn.</summary>
+    void DrawCompletionPopup(in FrameParams f)
+    {
+        _popupDrawn = false;
+        var items = _completion.Items;
+        if (!_completion.IsOpen || items.Count == 0)
+            return;
+
+        var m = _metrics;
+        var pal = _view.Palette;
+        float lineH = m.LineHeight;
+        float rowH = lineH + 2;
+        const float pad = 4;
+        int top = _completion.ScrollTop;
+        int rows = Math.Min(CompletionController.MaxVisible, items.Count - top);
+
+        float labelW = 0, kindW = 0;
+        for (int i = top; i < top + rows; i++)
+        {
+            labelW = MathF.Max(labelW, TextWidth(items[i].Label));
+            kindW = MathF.Max(kindW, TextWidth(items[i].KindLabel));
+        }
+        float width = MathF.Max(220, labelW + kindW + 4 * pad + 24);
+        float height = rows * rowH + 2 * pad;
+
+        var ws = _completion.WordStart;
+        float x = f.ContentOrigin.X + _view.TextStartX(m) + _view.ColumnToX(_core.Buffer.GetLineSpan(ws.Line), ws.Column, m) - pad;
+        float lineTop = f.ContentOrigin.Y + ws.Line * lineH;
+        float y = lineTop + lineH;
+        float winBottom = f.WindowPos.Y + f.WindowSize.Y;
+        if (y + height > winBottom && lineTop - height >= f.WindowPos.Y)
+            y = lineTop - height; // flip above when there is no room below
+        float winRight = f.WindowPos.X + f.WindowSize.X;
+        if (x + width > winRight)
+            x = MathF.Max(f.WindowPos.X, winRight - width);
+
+        var min = new Vector2(x, y);
+        var max = new Vector2(x + width, y + height);
+        _popupMin = min;
+        _popupMax = max;
+        _popupRowH = rowH;
+        _popupDrawn = true;
+
+        _sink.Begin(ImGui.GetForegroundDrawList());
+        _sink.Rect(min, max, pal.PopupBackground);
+        _sink.Line(min, new Vector2(max.X, min.Y), pal.PopupBorder, 1f);
+        _sink.Line(new Vector2(max.X, min.Y), max, pal.PopupBorder, 1f);
+        _sink.Line(max, new Vector2(min.X, max.Y), pal.PopupBorder, 1f);
+        _sink.Line(new Vector2(min.X, max.Y), min, pal.PopupBorder, 1f);
+        _sink.PushClip(min, max);
+
+        var mouse = ImGui.GetMousePos();
+        bool mouseIn = mouse.X >= min.X && mouse.X < max.X && mouse.Y >= min.Y + pad && mouse.Y < max.Y - pad;
+        int hoverRow = mouseIn ? (int)((mouse.Y - min.Y - pad) / rowH) : -1;
+        float textDy = (rowH - ImGui.GetFontSize()) * 0.5f;
+        for (int r = 0; r < rows; r++)
+        {
+            int i = top + r;
+            var item = items[i];
+            float ry = min.Y + pad + r * rowH;
+            if (i == _completion.Selected)
+                _sink.Rect(new Vector2(min.X + 1, ry), new Vector2(max.X - 1, ry + rowH), pal.PopupSelected);
+            else if (r == hoverRow)
+                _sink.Rect(new Vector2(min.X + 1, ry), new Vector2(max.X - 1, ry + rowH), pal.PopupHover);
+            _sink.Text(new Vector2(min.X + 2 * pad, ry + textDy), pal.Tokens[(int)KindColor(item.Kind)], item.Label);
+            float kw = TextWidth(item.KindLabel);
+            _sink.Text(new Vector2(max.X - 2 * pad - kw - 6, ry + textDy), pal.PopupDim, item.KindLabel);
+        }
+
+        // scroll indicator
+        if (items.Count > CompletionController.MaxVisible)
+        {
+            float trackH = height - 2 * pad;
+            float thumbH = MathF.Max(8, trackH * CompletionController.MaxVisible / items.Count);
+            float thumbY = min.Y + pad + (trackH - thumbH) * top / Math.Max(1, items.Count - CompletionController.MaxVisible);
+            _sink.Rect(new Vector2(max.X - 5, thumbY), new Vector2(max.X - 2, thumbY + thumbH), pal.PopupBorder);
+        }
+        _sink.PopClip();
+    }
+
+    /// <summary>Mouse on the popup (last frame's geometry): click accepts a row, wheel scrolls. Returns true if the mouse was handled.</summary>
+    bool HandlePopupMouse()
+    {
+        if (!_popupDrawn || !_completion.IsOpen)
+            return false;
+        var mouse = ImGui.GetMousePos();
+        if (mouse.X < _popupMin.X || mouse.X >= _popupMax.X || mouse.Y < _popupMin.Y || mouse.Y >= _popupMax.Y)
+            return false;
+        float wheel = ImGui.GetIO().MouseWheel;
+        if (wheel != 0)
+            _completion.Scroll(wheel > 0 ? -3 : 3);
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            int row = (int)((mouse.Y - _popupMin.Y - 4) / _popupRowH);
+            if (row >= 0 && row < CompletionController.MaxVisible)
+            {
+                _completion.Select(_completion.ScrollTop + row);
+                _completion.Accept();
+            }
+            _target = FocusTarget.Text;
+            return true;
+        }
+        return wheel != 0 || ImGui.IsMouseDown(ImGuiMouseButton.Left);
     }
 
     void DrawGotoBar()
@@ -730,7 +1073,7 @@ public sealed class LuaCodeEditor
 
     /// <summary>One-line input-routing state for host diagnostics (allocates; call only when debugging).</summary>
     public string DebugState =>
-        $"target={_target} find={_findOpen} goto={_gotoOpen} findText='{new string(_findField.Text)}' gotoText='{new string(_gotoField.Text)}' " +
+        $"target={_target} find={_findOpen} replace={_replaceOpen} goto={_gotoOpen} popup={_completion.IsOpen} findText='{new string(_findField.Text)}' gotoText='{new string(_gotoField.Text)}' " +
         $"editorFocused={_lastEditorFocused} textWindowFocused={_textWindowFocused} typedLastFrame={_lastTypedCount} enterCooldown={_enterCooldown}";
 
     // ================================================================= test hooks
@@ -743,6 +1086,9 @@ public sealed class LuaCodeEditor
     internal bool GotoOpen => _gotoOpen;
     internal LineInput FindField => _findField;
     internal LineInput GotoField => _gotoField;
+    internal LineInput ReplaceField => _replaceField;
+    internal bool ReplaceOpen => _replaceOpen;
+    internal CompletionController Completion => _completion;
 
     internal bool ColorizeAll() => _colorizer.Run(int.MaxValue);
 

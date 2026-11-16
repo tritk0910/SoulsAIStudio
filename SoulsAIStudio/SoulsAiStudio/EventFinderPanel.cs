@@ -29,7 +29,7 @@ namespace SoulsAiStudio.App
         private static readonly Kind[] Kinds =
         {
             new("Any event", "id or value (any field), or part of an event name", _ => true, Array.Empty<string>()),
-            new("SpEffect", "SpEffect id, e.g. 5032 (also finds SpEffects whose cycle applies it)", a => Array.IndexOf(SpEffectTypes, a.Type) >= 0, new[] { "SpEffectID", "SpEffectId" }),
+            new("SpEffect", "SpEffect id, e.g. 5032 (also finds SpEffects whose cycle applies it), or part of your label", a => Array.IndexOf(SpEffectTypes, a.Type) >= 0, new[] { "SpEffectID", "SpEffectId" }),
             new("Attack / Behavior", "BehaviorJudgeID", a => a.Type is 1 or 5 or 304 or 307, new[] { "BehaviorJudgeID" }),
             new("Bullet", "BehaviorJudgeID or DummyPolyID", a => a.Type is 2 or 4, new[] { "BehaviorJudgeID", "DummyPolyID" }),
             new("FFX", "FFX id, e.g. 401 (SpawnOneShotFFX…)", a => NameHas(a, "FFX"), new[] { "FFXID" }),
@@ -39,7 +39,7 @@ namespace SoulsAiStudio.App
         };
 
         private sealed record Hit(DSAProj.AnimCategory Category, DSAProj.Animation Anim, DSAProj.Action Act, string AnimName,
-            float StartFrame, float EndFrame, string EventName, string Matched, string Note);
+            float StartFrame, float EndFrame, string EventName, string Matched, string Note, int? SpEffectId);
 
         private readonly SasApp _app;
         public bool IsOpen;
@@ -151,6 +151,11 @@ namespace SoulsAiStudio.App
                                 _selected = i;
                                 Jump(screen, h);
                             }
+                            if (h.SpEffectId is int sp)
+                            {
+                                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Click: jump to it\nRight-click: set a label for SpEffect {sp}");
+                                _app.SpEffectLabelContextMenu($"##sas_hit_ctx{i}", sp);
+                            }
                             if (current) { ImGui.SameLine(); ImGui.TextColored(Theme.Accent, "•"); }
                             ImGui.TableNextColumn(); ImGui.TextDisabled($"{h.StartFrame:0}–{h.EndFrame:0}");
                             ImGui.TableNextColumn(); ImGui.Text(h.EventName);
@@ -178,15 +183,15 @@ namespace SoulsAiStudio.App
         /// <summary>Re-runs the search when the query, kind, scope, character or selected anim changed (cheap: ~1000 anims).</summary>
         private void Search(DSAnimStudio.TaeEditor.TaeEditorScreen screen, DSAProj proj)
         {
-            string key = $"{_kind}|{_query}|{_thisAnimOnly}|{proj.GetHashCode()}|{(_thisAnimOnly ? screen.SelectedAnim?.GetHashCode() : 0)}|{(int)(ImGui.GetTime() / 2)}";
+            string key = $"{_kind}|{_query}|{_thisAnimOnly}|{_app.SpEffectLabels.Version}|{proj.GetHashCode()}|{(_thisAnimOnly ? screen.SelectedAnim?.GetHashCode() : 0)}|{(int)(ImGui.GetTime() / 2)}";
             if (key == _searchedKey) return;
             _searchedKey = key;
             _selected = -1;
-            _hits = Run(screen, proj, Kinds[_kind], _query.Trim(), _thisAnimOnly);
+            _hits = Run(screen, proj, Kinds[_kind], _query.Trim(), _thisAnimOnly, _app.SpEffectLabels.Get);
             _animCount = _hits.Select(h => h.Anim).Distinct().Count();
         }
 
-        private static List<Hit> Run(DSAnimStudio.TaeEditor.TaeEditorScreen screen, DSAProj proj, Kind kind, string query, bool thisAnimOnly)
+        private static List<Hit> Run(DSAnimStudio.TaeEditor.TaeEditorScreen screen, DSAProj proj, Kind kind, string query, bool thisAnimOnly, Func<int, string?> label)
         {
             var hits = new List<Hit>();
             bool listAll = query.Length == 0;
@@ -210,17 +215,20 @@ namespace SoulsAiStudio.App
                         if (!kind.Match(act)) continue;
                         string evName = act.Parameters?.Template?.Name ?? $"Event {act.Type}";
                         string matched, note = "";
-                        if (listAll) matched = Summary(act, kind, spParams);
-                        else if (isNumber && FieldEquals(act, kind, number) is { } field) matched = $"{field} = {number}{SpName(act, kind, spParams)}";
+                        int? spId = SpEffectIdOf(act);
+                        string? spLabel = spId is int sid ? label(sid) : null;
+                        if (listAll) matched = Summary(act, kind, spParams, label);
+                        else if (isNumber && FieldEquals(act, kind, number) is { } field) matched = $"{field} = {number}{SpName(act, kind, spParams, label)}";
                         else if (isNumber && kind.Name == "SpEffect" && CycleOf(act, number, spParams) is { } via)
                         {
-                            matched = $"SpEffectID = {via}";
-                            note = $"applies {number} by cycle";
+                            matched = $"SpEffectID = {via}{(label((int)via) is { } vl ? "  " + vl : "")}";
+                            note = $"applies {number}{(label((int)number) is { } nl ? " " + nl : "")} by cycle";
                         }
-                        else if (!isNumber && (evName.Contains(query, StringComparison.OrdinalIgnoreCase) || act.Type.ToString(CultureInfo.InvariantCulture) == query))
-                            matched = Summary(act, kind, spParams);
+                        else if (!isNumber && (evName.Contains(query, StringComparison.OrdinalIgnoreCase) || act.Type.ToString(CultureInfo.InvariantCulture) == query
+                                                || spLabel?.Contains(query, StringComparison.OrdinalIgnoreCase) == true))
+                            matched = Summary(act, kind, spParams, label);
                         else continue;
-                        hits.Add(new Hit(category, anim, act, animName, act.StartTime / snap, act.EndTime / snap, evName, matched, note));
+                        hits.Add(new Hit(category, anim, act, animName, act.StartTime / snap, act.EndTime / snap, evName, matched, note, spId));
                     }
                 }
             }
@@ -277,17 +285,23 @@ namespace SoulsAiStudio.App
             return null;
         }
 
-        private static string SpName(DSAProj.Action act, Kind kind, System.Collections.Concurrent.ConcurrentDictionary<long, ParamData.SpEffectParam>? spParams)
+        /// <summary>SpEffect id of a SpEffect-type TAE event, else null.</summary>
+        private static int? SpEffectIdOf(DSAProj.Action act) =>
+            Array.IndexOf(SpEffectTypes, act.Type) >= 0 && KeyValue(act, Kinds[1]) is string s && int.TryParse(s, out int id) ? id : null;
+
+        /// <summary>"  name  → cycle …" after a SpEffect id: the user's label wins over the SpEffectParam row name.</summary>
+        private static string SpName(DSAProj.Action act, Kind kind, System.Collections.Concurrent.ConcurrentDictionary<long, ParamData.SpEffectParam>? spParams, Func<int, string?> label)
         {
-            if (kind.Name != "SpEffect" || spParams == null || KeyValue(act, kind) is not string s || !long.TryParse(s, out long id)) return "";
-            if (!spParams.TryGetValue(id, out var p)) return "  (not in SpEffectParam)";
-            string name = string.IsNullOrWhiteSpace(p.Name) ? "" : $"  {p.Name}";
-            string cycle = p.SasCycleSpEffectId > 0 ? $"  → cycle {p.SasCycleSpEffectId}{(p.SasMotionInterval > 0 ? $" every {p.SasMotionInterval:0.##} s" : "")}" : "";
+            if (kind.Name != "SpEffect" || SpEffectIdOf(act) is not int id) return "";
+            string? user = label(id);
+            if (spParams == null || !spParams.TryGetValue(id, out var p)) return user != null ? $"  {user}" : spParams == null ? "" : "  (not in SpEffectParam)";
+            string name = user != null ? $"  {user}" : string.IsNullOrWhiteSpace(p.Name) ? "" : $"  {p.Name}";
+            string cycle = p.SasCycleSpEffectId > 0 ? $"  → cycle {p.SasCycleSpEffectId}{(label(p.SasCycleSpEffectId) is { } cl ? " " + cl : "")}{(p.SasMotionInterval > 0 ? $" every {p.SasMotionInterval:0.##} s" : "")}" : "";
             return name + cycle;
         }
 
         /// <summary>Short "Field = value" text of an event (its key fields, or the first few fields).</summary>
-        private static string Summary(DSAProj.Action act, Kind kind, System.Collections.Concurrent.ConcurrentDictionary<long, ParamData.SpEffectParam>? spParams)
+        private static string Summary(DSAProj.Action act, Kind kind, System.Collections.Concurrent.ConcurrentDictionary<long, ParamData.SpEffectParam>? spParams, Func<int, string?> label)
         {
             var p = act.Parameters;
             if (p?.Template == null) return "";
@@ -298,7 +312,7 @@ namespace SoulsAiStudio.App
                 if (kind.KeyFields.Length > 0 && !kind.KeyFields.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase))) continue;
                 parts.Add($"{name} = {p.Template[i].ValueToString(p.Values[i])}");
             }
-            return string.Join(", ", parts) + SpName(act, kind, spParams);
+            return string.Join(", ", parts) + SpName(act, kind, spParams, label);
         }
     }
 }

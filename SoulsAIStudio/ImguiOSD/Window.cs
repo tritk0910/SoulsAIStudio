@@ -223,7 +223,7 @@ namespace DSAnimStudio.ImguiOSD
 
 
 
-                    ImGui.Begin(ImguiTag, ref IsOpen, flags);
+                    SoulsAiStudio.App.SasHooks.ReportWindowBegin(this, ImGui.Begin(ImguiTag, ref IsOpen, flags)); // [SAS] Graph hidden tab: no graph draw/input
                     try
                     {
                         if (IsRequestFocus)

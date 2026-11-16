@@ -91,7 +91,7 @@ namespace SoulsAiStudio.App
             ImGui.TextDisabled("Layout");
             ImGui.SameLine();
             if (ImGui.RadioButton("AI##sas_layout_ai", layout == WorkspaceLayout.Ai)) _app.SetLayout(WorkspaceLayout.Ai);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor shown (as a tab next to Graph).");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor shown (where you docked it; Souls AI > Layout has presets).");
             ImGui.SameLine();
             if (ImGui.RadioButton("Animation##sas_layout_anim", layout == WorkspaceLayout.Animation)) _app.SetLayout(WorkspaceLayout.Animation);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor hidden: the Graph (TAE timeline) stays visible for animation editing.");

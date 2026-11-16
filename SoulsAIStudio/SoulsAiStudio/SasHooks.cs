@@ -16,8 +16,9 @@ namespace SoulsAiStudio.App
         public static SasApp App => _app.Value;
 
         /// <summary>
-        /// True while our Lua Editor tab is the visible tab of the dock node that hosts DSAS's "Graph". The TAE graph is
-        /// custom-drawn (not ImGui), so DSAS must skip its draw + mouse input then, or it paints over the editor.
+        /// True while DSAS's "Graph" window is not visible: another tab of its dock node (e.g. our Lua Editor) is in front,
+        /// or one of our windows sits inside the Graph window (see <see cref="SasLayout"/>). The TAE graph is custom-drawn
+        /// (not ImGui), so DSAS must skip its draw + mouse input then, or it paints over that window.
         /// </summary>
         public static volatile bool GraphHidden;
 
@@ -27,6 +28,13 @@ namespace SoulsAiStudio.App
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
 
+        /// <summary>
+        /// Starting camera distance when a character loads. DSAS frames the hit capsule edge to edge, which is very close;
+        /// we back off so the whole character, its weapon swings and the ground around it are visible.
+        /// </summary>
+        public const float ViewportStartZoomOut = 1.8f;
+
+        public static float StartCameraDistance(float dsasDistance) => dsasDistance * ViewportStartZoomOut;
         /// <summary>Called from <c>OSD.Build</c> after DSAS windows; draws our windows.</summary>
         public static void BuildWindows(ref bool anyFieldFocused)
         {
@@ -121,6 +129,51 @@ namespace SoulsAiStudio.App
         /// <summary>Called from DSAS <c>Window.Update</c> right after <c>ImGui.Begin</c>: reports its dock node.</summary>
         public static void ReportWindowDock(string title, uint dockId) => App.Layout.ReportDock(title, dockId);
 
+        /// <summary>
+        /// DSAS <c>Window.Update</c>: wraps its <c>ImGui.Begin</c> and returns its result unchanged. For the Graph window,
+        /// false means it is a hidden tab (another tab of its dock node is in front): the custom-drawn graph must then
+        /// neither draw nor take input (see <see cref="GraphHidden"/>).
+        /// </summary>
+        public static bool ReportWindowBegin(DSAnimStudio.ImguiOSD.Window window, bool visible)
+        {
+            if (ReferenceEquals(window, DSAnimStudio.ImguiOSD.OSD.SpWindowGraph)) App.Layout.ReportGraphBegin(visible);
+            return visible;
+        }
+
+        /// <summary>
+        /// DSAS Graph window: flags of its inner dockspace (it hosts the "Tracks" / "Actions" helper windows). While any
+        /// window is dragged for docking, the inner dockspace is only kept alive (no drop targets): otherwise ImGui prefers
+        /// its smaller drop target over the main dockspace, so a panel dropped anywhere on the graph got docked INSIDE the
+        /// Graph window, under the custom-drawn timeline (which covered it and ate its clicks), and the Graph's own node
+        /// could never be split by dragging. Unchanged in DSAS's "Debug ImGui Dock Edit" mode.
+        /// </summary>
+        public static ImGuiDockNodeFlags GraphDockSpaceFlags(ImGuiDockNodeFlags dsasFlags)
+        {
+            try
+            {
+                if (DSAnimStudio.ImguiOSD.OSD.DebugIsDockEditMode || !SasLayout.IsDraggingWindow()) return dsasFlags;
+                return dsasFlags | ImGuiDockNodeFlags.KeepAliveOnly;
+            }
+            catch (Exception) { return dsasFlags; }
+        }
+
+        /// <summary>
+        /// TaeEditorScreen: the mouse inside the graph rect belongs to the graph (drag/select/hover blocks), i.e. the graph
+        /// is visible and none of our windows (floating over it) is under the mouse.
+        /// </summary>
+        /// <summary>
+        /// Before drawing the TAE graph: re-read its display rect from the Graph window's current size. DSAS only does this in
+        /// the graph's Update, which is skipped while one of our panels has focus, so after a docking change the graph kept
+        /// its old (larger) rect and drew over the panel next to it.
+        /// </summary>
+        public static void RefreshGraphRect(DSAnimStudio.TaeEditor.NewGraph graph)
+        {
+            try { graph.ScrollViewer.SetDisplayRect(graph.WholeScrollViewerRect, graph.LayoutManager.GetVirtualAreaSize()); }
+            catch (Exception) { }
+        }
+
+        public static bool GraphTakesMouse =>!GraphHidden && !App.Layout.OurWindowHovered;
+
         /// <summary>Called by DSAS right after it creates the document for an open-recent request.</summary>
         public static void BeforeOpenRecent(DSAnimStudio.zzz_DocumentIns doc, DSAnimStudio.DSAProj.TaeContainerInfo container)
         {
@@ -185,6 +238,13 @@ namespace SoulsAiStudio.App
             if (idx >= 0) DSAnimStudio.ViewportEnvironment.CubemapNameIndex = idx;
             DSAnimStudio.ViewportEnvironment.DrawCubemap = lighting499;
             return true;
+        }
+
+        /// <summary>Log window's "Hide Popup Notifications" was toggled: remember it across launches.</summary>
+        public static void HideNotificationPopupsChanged(bool hide)
+        {
+            try { App.Settings.HideNotificationPopups = hide; App.Settings.Save(); }
+            catch (Exception) { }
         }
 
         /// <summary>Initial sound volume for each new DSAS document (DSAS kept it per document and reset it to 100).</summary>

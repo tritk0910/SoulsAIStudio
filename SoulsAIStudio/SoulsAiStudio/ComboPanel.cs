@@ -15,7 +15,7 @@ namespace SoulsAiStudio.App
     /// "End If AI ComboAttack Queued" or at the chosen SpEffect. Tab "Manual": a typed combo script
     /// (<see cref="ComboScriptTab"/>, replaces DSAS's Combo Viewer). Not yet: OnHit SpEffect sources (needs params).
     /// </summary>
-    public sealed class ComboPanel
+    public sealed partial class ComboPanel
     {
         public const string WindowName = "Combo##sas_combo";
         private readonly SasApp _app;
@@ -31,6 +31,11 @@ namespace SoulsAiStudio.App
         private string? _cacheKey;
         private IReadOnlyList<ComboNode> _nodes = Array.Empty<ComboNode>();
         private GoalFunction? _goal;
+        /// <summary>Combo started from a Goal.Interrupt SpEffect arm (<c>== S</c>) instead of a goal: its handler.</summary>
+        private SpEffectHandler? _start;
+        /// <summary>SpEffect picked in the "Start from" dropdown; kept until the user moves the cursor.</summary>
+        private int? _pickedSp;
+        private string _startFilter = "";
         private bool _follow = true;
         /// <summary>Cursor position set by our own jump (click on a step): while the cursor stays there, keep the
         /// current goal instead of following it into e.g. Goal.Interrupt.</summary>
@@ -100,44 +105,142 @@ namespace SoulsAiStudio.App
         private void Refresh()
         {
             var o = _editor.Active;
-            if (o?.Doc == null) { _goal = null; _nodes = Array.Empty<ComboNode>(); return; }
-            if (_ownJump != null && o.Editor.Cursor != _ownJump) _ownJump = null; // the user moved the cursor: follow again
-            var goal = _follow && _ownJump == null ? o.GoalAtCursor ?? _goal : _goal;
+            if (o?.Doc == null) { _goal = null; _start = null; _nodes = Array.Empty<ComboNode>(); return; }
+            if (_ownJump != null && o.Editor.Cursor != _ownJump) { _ownJump = null; _pickedSp = null; } // the user moved the cursor: follow again
+            bool following = _follow && _ownJump == null;
+            var goal = following ? o.GoalAtCursor ?? _goal : _goal;
             if (goal != null && _goal != null && goal.Name != _goal.Name) goal = o.Outline.FirstOrDefault(g => g.Name == goal.Name) ?? goal;
-            string key = $"{o.Script.Key}|{goal?.Name}|{o.OutlineVersion}";
+
+            string handlersKey = $"{o.Script.Key}|{o.OutlineVersion}";
+            if (handlersKey != _handlersKey) { _handlers = SpEffectInterrupts.Build(o.Editor.Text); _handlersKey = handlersKey; }
+
+            // Start from a SpEffect arm: picked in the dropdown, or the cursor is inside "== S" in Goal.Interrupt.
+            int? sp = _pickedSp
+                ?? (following ? (o.GoalAtCursor?.Name == "Interrupt" && _handlers != null ? SpEffectInterrupts.HandlerAt(_handlers, o.CursorLine)?.SpEffectId : null)
+                              : _start?.SpEffectId);
+            SpEffectHandler? start = sp is int id && _handlers != null && _handlers.Handlers.TryGetValue(id, out var h) ? h : null;
+
+            string key = $"{handlersKey}|{goal?.Name}|{start?.SpEffectId}";
             if (key == _cacheKey) return;
             _cacheKey = key;
             _goal = goal;
+            _start = start;
             _choice.Clear();
             _interrupt.Clear();
             _trigger.Clear();
             _plan = null;
-            string text = o.Editor.Text;
-            _nodes = goal == null ? Array.Empty<ComboNode>() : ComboSequence.Build(text, goal);
-            _handlers = SpEffectInterrupts.Build(text);
+            _nodes = start != null ? start.Body
+                : goal == null ? Array.Empty<ComboNode>() : ComboSequence.Build(o.Editor.Text, goal);
+        }
+
+        private string? _handlersKey;
+
+        /// <summary>"Start from" dropdown: the goal at the cursor, or any SpEffect arm of Goal.Interrupt.</summary>
+        private void DrawStartFrom()
+        {
+            var handlers = _handlers?.Handlers.Values
+                .GroupBy(h => h.Line).Select(g => g.First()) // "sp == 1 or sp == 2": one arm
+                .OrderBy(h => h.Line).ToList() ?? new List<SpEffectHandler>();
+            ImGui.TextDisabled("Start from");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(-1);
+            string label = _start != null ? StartLabel(_start) : _goal != null ? $"{_goal.QualifiedName} (line {_goal.Line + 1})" : "(put the cursor inside a goal)";
+            if (ImGui.BeginCombo("##sas_combo_start", label, ImGuiComboFlags.HeightLarge))
+            {
+                try
+                {
+                    if (ImGui.IsWindowAppearing()) { _startFilter = ""; ImGui.SetKeyboardFocusHere(); }
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputTextWithHint("##sas_combo_start_filter", "filter: SpEffect id, name or anim", ref _startFilter, 64);
+                    if (ImGui.Selectable($"Goal at the cursor{(_editor.Active?.GoalAtCursor is { } g ? $" ({g.QualifiedName})" : "")}", _start == null))
+                    { _pickedSp = null; _ownJump = null; _follow = true; _cacheKey = null; }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Follow the Lua editor cursor again (Act, Kengeki… or a \"== SpEffect\" arm in Goal.Interrupt)");
+                    if (handlers.Count == 0) ImGui.TextDisabled("Goal.Interrupt has no SpEffect arms in this script.");
+                    else ImGui.TextDisabled($"Goal.Interrupt SpEffect arms ({handlers.Count}):");
+                    foreach (var h in handlers)
+                    {
+                        string text = StartLabel(h);
+                        if (_startFilter.Length > 0 && !text.Contains(_startFilter, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (ImGui.Selectable(text + $"##sp_start{h.Line}", _start?.Line == h.Line))
+                        {
+                            _pickedSp = h.SpEffectId;
+                            _ownJump = _editor.Active?.Editor.Cursor; // keep it until the cursor moves
+                            _cacheKey = null;
+                        }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Goal.Interrupt line {h.Line + 1}:\nif {h.Condition}" + (h.DependsOnDistance ? "\n[distance]: the arm also tests the distance to the target" : "") + "\nRight-click: set a label for this SpEffect");
+                        _app.SpEffectLabelContextMenu($"##sp_start_ctx{h.Line}", h.SpEffectId);
+                    }
+                }
+                finally { ImGui.EndCombo(); }
+            }
+            else if (ImGui.IsItemHovered()) ImGui.SetTooltip("Play an Act/Kengeki goal (cursor inside it), or start straight from a SpEffect interrupt:\n" +
+                "the anims Goal.Interrupt queues when that SpEffect activates. Putting the cursor inside an\n" +
+                "\"interruptSpeffect == S\" arm also selects it.");
+        }
+
+        /// <summary>"SpEffect 5060040 name -> 3037 / 3018 [25%] (line 812)" (name = user label or SpEffectParam name).</summary>
+        private string StartLabel(SpEffectHandler h)
+        {
+            var first = FirstAnims(h.Body).Distinct().Take(4).ToList();
+            string anims = h.Replans ? "  -> Replanning()" : first.Count > 0 ? "  -> " + string.Join(" / ", first) : "  (no anims)";
+            string tags = (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.DependsOnDistance ? " [distance]" : h.HasStateCondition ? " [conditional]" : "");
+            return $"SpEffect {_app.SpEffectText(h.SpEffectId)}{anims}{tags}  (line {h.Line + 1})";
+        }
+
+        /// <summary>First anim of every arm path (one per random/condition arm at the top), for the dropdown summary.</summary>
+        private static IEnumerable<int> FirstAnims(IReadOnlyList<ComboNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n is ComboStep s) { yield return s.AnimId; yield break; }
+                if (n is ComboBranch b)
+                {
+                    bool any = false;
+                    foreach (var a in b.Arms) foreach (int id in FirstAnims(a.Body).Take(1)) { any = true; yield return id; }
+                    if (any) yield break;
+                }
+            }
         }
 
         private void BuildContents()
         {
-            if (_goal == null) { ImGui.TextDisabled("Put the cursor inside a goal (e.g. Goal.Act50 or Goal.Kengeki03)."); return; }
+            DrawStartFrom();
+            if (_goal == null && _start == null) { ImGui.TextDisabled("Put the cursor inside a goal (e.g. Goal.Act50 or Goal.Kengeki03),\nor pick a SpEffect interrupt in \"Start from\"."); return; }
 
-            ImGui.TextColored(Theme.Accent, _goal.QualifiedName);
-            ImGui.SameLine();
-            ImGui.TextDisabled($"line {_goal.Line + 1}");
+            if (_start != null)
+            {
+                ImGui.TextColored(Theme.Accent, $"Goal.Interrupt > SpEffect {_app.SpEffectText(_start.SpEffectId)}");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Right-click: set a label for this SpEffect");
+                _app.SpEffectLabelContextMenu("##sas_combo_hdr_ctx", _start.SpEffectId);
+                ImGui.SameLine();
+                ImGui.TextDisabled($"line {_start.Line + 1}");
+            }
+            else
+            {
+                ImGui.TextColored(Theme.Accent, _goal!.QualifiedName);
+                ImGui.SameLine();
+                ImGui.TextDisabled($"line {_goal.Line + 1}");
+            }
             ImGui.SameLine();
             ImGui.Checkbox("Follow cursor", ref _follow);
+            if (_follow) _backTo = null;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("On: this tab shows the goal the Lua editor cursor is in. Move the cursor into another\n" +
                                  "Goal.XXX function and the combo here switches to it (your branch/interrupt choices reset).\n" +
                                  "Clicking an anim in this tab jumps the editor there but keeps this goal.\n\n" +
                                  "Off: this tab stays on the current goal, wherever you move the cursor.\n" +
                                  "Useful to keep a combo while you read Goal.Interrupt or another goal.");
+            DrawBackToTable();
+
+            // Goal.Activate / Goal.Kengeki_Activate: the act weight table instead of a combo.
+            if (CurrentWeightTable() is { } wt) { DrawWeightTable(wt); return; }
 
             string spKey = _app.Bridge.LoadedAnibnd + "|" + _app.ActiveAnimCategory; // the cache holds Lua ids: reset when the category changes
             if (_spEventsAnibnd != spKey) { _spEvents.Clear(); _spEventsAnibnd = spKey; }
             var path = BuildPath(_nodes, 0);
             bool loaded = _app.Bridge.LoadedAnibnd != null;
             if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Project panel → Load model & anims, or click a character).");
+            if (_start != null) DrawStartNotes(_start);
 
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
             ImGui.SameLine();
@@ -153,7 +256,8 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             if (ImGui.Button("→ Manual") && path.Count > 0)
             {
-                _manual.SetText($"# From Lua: Goal.{_goal.Name} (line {_goal.Line + 1})\n" + ComboScript.Format(path.Select(p =>
+                string from = _start != null ? $"Goal.Interrupt SpEffect {_app.SpEffectText(_start.SpEffectId)} (line {_start.Line + 1})" : $"Goal.{_goal!.Name} (line {_goal.Line + 1})";
+                _manual.SetText($"# From Lua: {from}\n" + ComboScript.Format(path.Select(p =>
                     (_app.TaeAnimId(p.Step.AnimId), p.SpEffectId is int sp ? new ComboCut(-1, sp, p.Cut != p.SpStart ? p.Cut : null) : ComboCut.ComboAttackQueued)).ToList()));
                 _selectManual = true;
             }
@@ -167,6 +271,20 @@ namespace SoulsAiStudio.App
             finally { ImGui.EndChild(); }
 
             if (_plan != null) DrawPlan();
+        }
+
+        /// <summary>What playing a SpEffect arm on its own means (shown above the tree).</summary>
+        private void DrawStartNotes(SpEffectHandler h)
+        {
+            ImGui.TextDisabled("if " + h.Condition);
+            if (h.Replans)
+                ImGui.TextColored(Theme.Warn, "This arm only calls Replanning(): the AI picks a new act in Goal.Activate, no combo to play here.");
+            else if (ComboSequence.Flatten(h.Body, ChosenArm).Count == 0 && !ComboSequence.Branches(h.Body).Any())
+                ImGui.TextColored(Theme.Warn, "This arm adds no AddSubGoal: nothing to play.");
+            if (!h.Replans && !ComboSequence.ContainsClear(h.Body))
+                ImGui.TextDisabled("No ClearSubGoal: in game these anims are queued after the current combo; here they play on their own.");
+            if (h.DependsOnDistance) ImGui.TextDisabled("[distance] the arm tests the distance to the target: pick the branches below yourself.");
+            else if (h.HasStateCondition) ImGui.TextDisabled("[conditional] the arm also checks game state (timer, SpEffect, HP...).");
         }
 
         private int ChosenArm(ComboBranch b) => _choice.TryGetValue(b.Line, out int k) ? k : DefaultArm(b);
@@ -286,8 +404,8 @@ namespace SoulsAiStudio.App
         }
 
         /// <summary>" (cycle of TAE SpEffect 205032, every 0.5 s)" for cycle SpEffects, else "".</summary>
-        private static string ViaText(DsasBridge.SpEffectEvent e) =>
-            e.ViaSpEffectId is int via ? $" (cycle of TAE SpEffect {via}{(e.Interval > 0 ? $", every {e.Interval:0.##} s" : "")})" : "";
+        private string ViaText(DsasBridge.SpEffectEvent e) =>
+            e.ViaSpEffectId is int via ? $" (cycle of TAE SpEffect {_app.SpEffectText(via)}{(e.Interval > 0 ? $", every {e.Interval:0.##} s" : "")})" : "";
 
         /// <summary>TAE SpEffect events of an anim. Empty results are not cached: the anibnd may still be loading.</summary>
         private IReadOnlyList<DsasBridge.SpEffectEvent> SpEvents(int animId)
@@ -308,7 +426,7 @@ namespace SoulsAiStudio.App
                 string how = _handlers != null && _handlers.Handlers.TryGetValue(e.SpEffectId, out var h)
                     ? (h.Replans ? "Interrupt: Replanning()" : $"Interrupt line {h.Line + 1}")
                     : "no handler in Goal.Interrupt";
-                return $"  {e.SpEffectId} @ frames {e.Frame:0}–{e.EndFrame:0}{ViaText(e)}  ({how})";
+                return $"  {_app.SpEffectText(e.SpEffectId)} @ frames {e.Frame:0}–{e.EndFrame:0}{ViaText(e)}  ({how})";
             });
             return "TAE SpEffect events:\n" + string.Join("\n", lines);
         }
@@ -334,7 +452,7 @@ namespace SoulsAiStudio.App
             ImGui.SetNextItemWidth(Math.Max(120, ImGui.GetContentRegionAvail().X - 130));
             if (ImGui.SliderInt($"##trig{s.Line}_{level}", ref at, lo, hi, "frame %d")) { _trigger[(s.Line, level)] = at; _plan = null; }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"SpEffect {ci.Handler.SpEffectId} is active from frame {lo} to {hi} ({lo / 30f:0.00}–{hi / 30f:0.00} s).\n" +
+                ImGui.SetTooltip($"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} is active from frame {lo} to {hi} ({lo / 30f:0.00}–{hi / 30f:0.00} s).\n" +
                                  "Its SpEffectParam can re-trigger the interrupt every interval while it is active,\n" +
                                  "so pick the frame where the handler's condition (e.g. distance) would become true.");
             ImGui.SameLine();
@@ -351,21 +469,26 @@ namespace SoulsAiStudio.App
             ImGui.SameLine();
             ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
             string label = k >= 0 && k < c.Count
-                ? $"SpEffect {c[k].SpEffectId}{(c[k].Via.Length > 0 ? " (cycle)" : "")} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.DependsOnDistance ? " [distance]" : c[k].Handler.HasStateCondition ? " [conditional]" : "")
+                ? $"SpEffect {_app.SpEffectText(c[k].SpEffectId)}{(c[k].Via.Length > 0 ? " (cycle)" : "")} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + (c[k].Handler.DependsOnDistance ? " [distance]" : c[k].Handler.HasStateCondition ? " [conditional]" : "")
                 : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available)";
-            if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label)) return;
+            if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label))
+            {
+                if (k >= 0 && k < c.Count) _app.SpEffectLabelContextMenu($"##sp_ctx{s.Line}_{depth}", c[k].SpEffectId);
+                return;
+            }
             try
             {
                 if (ImGui.Selectable("Continue normally (no interrupt)", k < 0)) { _interrupt[(s.Line, depth)] = -1; _trigger.Remove((s.Line, depth)); _plan = null; }
                 for (int i = 0; i < c.Count; i++)
                 {
                     var h = c[i].Handler;
-                    string text = $"SpEffect {c[i].SpEffectId}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
+                    string text = $"SpEffect {_app.SpEffectText(c[i].SpEffectId)}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
                         + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + (h.Chance is double ch ? $" [{ch:0}%]" : "") + (h.DependsOnDistance ? " [distance]" : h.HasStateCondition ? " [conditional]" : "");
                     if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _trigger.Remove((s.Line, depth)); _plan = null; }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (h.DependsOnDistance
                         ? "\n[distance]: tests the distance to the target, so Random path never picks it.\nCheck the conditions in the code and choose the trigger frame yourself."
-                        : ""));
+                        : "") + "\nRight-click: set a label for this SpEffect");
+                    _app.SpEffectLabelContextMenu($"##c_ctx{i}", c[i].SpEffectId);
                 }
             }
             finally { ImGui.EndCombo(); }
@@ -397,13 +520,15 @@ namespace SoulsAiStudio.App
                                 if (_editor.Active is { } ed) _ownJump = ed.Editor.Cursor;
                                 _app.PlayLuaAnim(s.AnimId);
                             }
-                            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\n\n" + SpEffectSummary(s.AnimId));
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\nRight-click: label its SpEffects\n\n" + SpEffectSummary(s.AnimId));
+                            StepContextMenu(s);
                             DrawInterruptChoice(s, level);
                             ImGui.Unindent(depth * 14 + 2);
                             if (ChosenInterrupt(s, level) is { } ci && level < MaxInterruptDepth)
                             {
                                 ImGui.Indent((depth + 1) * 14 + 2);
-                                ImGui.TextColored(Theme.Warn, $"SpEffect {ci.Handler.SpEffectId} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, ChosenArm) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
+                                ImGui.TextColored(Theme.Warn, $"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, ChosenArm) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
+                                _app.SpEffectLabelContextMenu($"##ci_ctx{s.Line}_{level}", ci.Handler.SpEffectId);
                                 DrawTriggerFrame(s, level, ci);
                                 ImGui.Unindent((depth + 1) * 14 + 2);
                                 DrawNodes(ci.Handler.Body, depth + 1, level + 1);
@@ -434,6 +559,24 @@ namespace SoulsAiStudio.App
                 }
                 finally { ImGui.PopID(); }
             }
+        }
+
+        /// <summary>Right-click on a step: label any SpEffect of its TAE (incl. cycle SpEffects).</summary>
+        private void StepContextMenu(ComboStep s)
+        {
+            if (!ImGui.BeginPopupContextItem($"##step_ctx{s.Line}")) return;
+            try
+            {
+                var ids = SpEvents(s.AnimId).Select(e => e.SpEffectId).Distinct().ToList();
+                if (ids.Count == 0) ImGui.TextDisabled("No SpEffect events in this anim's TAE (or not loaded).");
+                foreach (int id in ids)
+                    if (ImGui.BeginMenu($"SpEffect {_app.SpEffectText(id)}##m{id}"))
+                    {
+                        _app.SpEffectLabelMenuItems(id);
+                        ImGui.EndMenu();
+                    }
+            }
+            finally { ImGui.EndPopup(); }
         }
 
         private void DrawPlan()

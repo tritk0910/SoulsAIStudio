@@ -8,7 +8,8 @@ namespace SoulsAiStudio.Core.Lua.Analysis;
 /// <param name="Condition">The arm's full condition (may add e.g. <c>and interruptRand &lt;= 75</c> or a timer check).</param>
 /// <param name="NonRandomCondition">The arm condition has a game-state part that is neither random nor distance (timer, HasSpecialEffectId, HP…).</param>
 /// <param name="DependsOnDistance">The arm condition or a branch in its body tests the distance to the target (a value traced back to a GetDist… call, whatever the variable is named).</param>
-public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null, bool NonRandomCondition = false, bool DependsOnDistance = false)
+/// <param name="EndLine">0-based last line of the arm (the line before the next arm, or one past its last statement).</param>
+public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null, bool NonRandomCondition = false, bool DependsOnDistance = false, int EndLine = -1)
 {
     /// <summary>Chance (0–100) that the arm fires when the SpEffect activates, from <c>and rand &lt;= N</c> in its
     /// condition; null = no random part (timer/state checks are not counted).</summary>
@@ -69,20 +70,44 @@ public static class SpEffectInterrupts
                     var arm = branch.Arms[a];
                     int line = arm.Line >= 0 ? arm.Line : branch.Line;
                     // The arm's source lines end where the next arm starts (or a few lines on for the last one).
-                    int endLine = a + 1 < branch.Arms.Count && branch.Arms[a + 1].Line > line ? branch.Arms[a + 1].Line - 1 : line + 3;
+                    bool hasNext = a + 1 < branch.Arms.Count && branch.Arms[a + 1].Line > line;
+                    int endLine = hasNext ? branch.Arms[a + 1].Line - 1 : line + 3;
+                    int armEnd = hasNext ? endLine : Math.Max(line, MaxLine(arm.Body)) + 1;
                     foreach (int id in SpEffectIds(arm.Condition, spVars))
                         handlers.TryAdd(id, new SpEffectHandler(id, line,
                             arm.Body.FirstOrDefault() is ComboClear,
                             Replans(src, t, line, endLine, arm), arm.Body, arm.Condition, RandomChance(arm.Condition, randVars),
                             HasNonRandomPart(arm.Condition, spVars, randVars, distVars),
                             MentionsDistance(arm.Condition, distVars)
-                                || ComboSequence.Branches(arm.Body).Any(b => b.Arms.Any(x => MentionsDistance(x.Condition, distVars)))));
+                                || ComboSequence.Branches(arm.Body).Any(b => b.Arms.Any(x => MentionsDistance(x.Condition, distVars))),
+                            armEnd));
                 }
         }
         return new Table(handlers, observed);
     }
 
-    /// <summary><c>... and r &lt;= 75</c> with r a GetRandam_Int(1, 100) variable → 75 (smallest if several).</summary>
+    /// <summary>
+    /// The handler arm whose lines contain <paramref name="line"/> (0-based), e.g. the cursor inside
+    /// <c>elseif interruptSpeffect == 5060040 then … </c>; the innermost one if arms are nested. Null outside every arm.
+    /// </summary>
+    public static SpEffectHandler? HandlerAt(Table table, int line) =>
+        table.Handlers.Values
+            .Where(h => h.Line <= line && line <= Math.Max(h.Line, h.EndLine))
+            .OrderByDescending(h => h.Line)
+            .FirstOrDefault();
+
+    private static int MaxLine(IReadOnlyList<ComboNode> nodes)
+    {
+        int max = -1;
+        foreach (var n in nodes)
+        {
+            max = Math.Max(max, n.Line);
+            if (n is ComboBranch b)
+                foreach (var a in b.Arms) max = Math.Max(max, Math.Max(a.Line, MaxLine(a.Body)));
+        }
+        return max;
+    }
+
     /// <summary>
     /// Variables of one function (lines <paramref name="line0"/>–<paramref name="line1"/>) that hold a distance: assigned
     /// from an expression with a <c>GetDist…</c> call, or from another such variable (e.g. <c>local d = getDist - 1</c>).

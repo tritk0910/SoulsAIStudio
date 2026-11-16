@@ -58,7 +58,7 @@ namespace DSAnimStudio.ImguiOSD
                 
                 var dsid = ImGui.GetID("DockSpace_NewActionGraph");
                 // ImGuiDockNodeFlags (1 << 12) is ImGuiDockNodeFlags_NoTabBar
-                ImGui.DockSpace(dsid, new Vector2(0, 0), ImGuiDockNodeFlags.PassthruCentralNode | (ImGuiDockNodeFlags)(1 << 12));
+                ImGui.DockSpace(dsid, new Vector2(0, 0), SoulsAiStudio.App.SasHooks.GraphDockSpaceFlags(ImGuiDockNodeFlags.PassthruCentralNode | (ImGuiDockNodeFlags)(1 << 12))); // [SAS] panels dropped on the graph split its node instead of docking inside it
 
                 
                 
