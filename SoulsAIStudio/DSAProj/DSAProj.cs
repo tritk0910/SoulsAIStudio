@@ -1445,6 +1445,7 @@ namespace DSAnimStudio
             INNER_InitDefaultSoundBanksToLoad();
 
             INNER_FixupAfterLoading();
+            INNER_ClearAllModified(); // [SAS] just read from the anibnd: nothing modified yet (AddAnimation flagged every category, so the title showed "*")
 
             //TESTING
             //Console.WriteLine("breakpoint lol");
