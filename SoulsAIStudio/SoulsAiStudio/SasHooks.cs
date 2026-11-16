@@ -23,7 +23,7 @@ namespace SoulsAiStudio.App
         public static volatile bool GraphHidden;
 
         public const string AppName = "Souls AI Studio";
-        public const string AppVersion = "0.2.2";
+        public const string AppVersion = "0.2.3";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
