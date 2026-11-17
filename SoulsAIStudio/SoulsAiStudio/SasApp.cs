@@ -15,7 +15,7 @@ namespace SoulsAiStudio.App
     /// Root of the Souls AI Studio UI inside DSAS. Owns settings, the open project and all panels
     /// (one object, constructor-injected parts — no new statics besides the <see cref="SasHooks"/> seam).
     /// </summary>
-    public sealed class SasApp
+    public sealed partial class SasApp
     {
         public SasSettings Settings { get; } = SasSettings.Load();
         private readonly ViewportLightingStore _lighting;
@@ -100,6 +100,7 @@ namespace SoulsAiStudio.App
         {
             OodleLoader.TryLoad(project.GameDir); // DCX_KRAK luabnd/gameparam
             Session = new ProjectSession(project, Settings.DecompilerPath);
+            StartFileWatch(); // SasApp.Watch.cs
             Recent.Add(project.FilePath);
             Settings.LastProjectFolder = project.ProjectDir;
             Settings.LastGameDir = project.GameDir;
@@ -125,6 +126,7 @@ namespace SoulsAiStudio.App
             if (!ConfirmDiscardUnsaved()) return;
             SaveProjectUiState();
             _editor.CloseAll();
+            StopFileWatch();
             Session = null;
             _start.IsOpen = true;
         }
@@ -198,6 +200,7 @@ namespace SoulsAiStudio.App
                 focused |= _editor.Build();
                 focused |= _combo.Build();
                 focused |= _luabnd.Build();
+                PollFileWatch(); // external changes: reload / banners (SasApp.Watch.cs)
             }
             focused |= _findScripts.Build(); // also cancels its search when the project closes
             focused |= _finder.Build(); // works with any loaded character, project or not
@@ -282,6 +285,7 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
+            WatchFilesMenuItem();
             SasHooks.ScrubFollow.MenuItem();
             if (ImGui.MenuItem("Lighting Like DSAS 4.9.9", "", Settings.Lighting499))
             {

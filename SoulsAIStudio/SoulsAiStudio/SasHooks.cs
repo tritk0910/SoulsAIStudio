@@ -487,6 +487,7 @@ namespace SoulsAiStudio.App
                 throw new IOException(why);
             }
             App.BackupBeforeExternalWrite(path);
+            using var own = SoulsAiStudio.Core.IO.OwnWriteTrackerExtensions.Track(App.FileWatch, path); // our save: not an external change
             SoulsAiStudio.Core.IO.AtomicFile.WriteAllBytes(path, bytes);
         }
     }

@@ -446,7 +446,7 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 ## 11. Thứ tự bắt tay vào làm
 1. ~~Fork DSAS, build~~ (xong: clone + branch `sas/main`, build xanh). Còn: chạy thử app với Sekiro.
 2. ~~Đọc code DSAS, chốt `[TBD]`~~ (xong phần lớn — xem `docs/review/`, `docs/ux/`).
-3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `SoulsAIStudio/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). Còn: file watcher.
+3. ~~Project system (New/Open/Recent) + đọc/ghi luabnd + backup~~ (xong: `src/SoulsAiStudio.Core/Project`, UI trong `SoulsAIStudio/SoulsAiStudio/`: start screen, wizard, Scripts panel + goal outline, Lua editor tạm bằng InputTextMultiline). File watcher: `Core/Watch` (`FileChangeWatcher`, debounce 500 ms, bỏ qua write của app qua `IOwnWriteTracker`, `LineDiff`) + `SasApp.Watch.cs` / `LuaEditorPanel.External.cs`; bật/tắt ở menu Souls AI → "Watch Files for External Changes".
    - Mở thẳng project: `"Souls AI Studio.exe" --sas-project <file.sasproj>` (exe: `SoulsAIStudio/bin/Release/net9.0-windows7.0/Souls AI Studio.exe`). Biến môi trường `SOULSAISTUDIO_USERDATA` đổi chỗ lưu settings/recent (UI test phải dùng, không ghi vào %AppData% thật).
 4. Prototype **Lua editor trong ImGui** (rủi ro lớn nhất) + đọc/ghi luabnd Sekiro.
 5. Entity browser + resolve param chain (NpcParam → NpcThinkParam → Lua; BehaviorParam → AtkParam/SpEffect).

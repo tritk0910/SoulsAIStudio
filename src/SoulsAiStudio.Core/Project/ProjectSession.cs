@@ -54,6 +54,9 @@ public sealed class ProjectSession
     public ScriptCatalog Catalog { get; }
     public BackupService Backups { get; }
 
+    /// <summary>Told about every file this session writes into the mod (so a file watcher ignores our own saves).</summary>
+    public IOwnWriteTracker? WriteTracker { get; set; }
+
     public async Task<ScriptDocument> OpenAsync(ProjectScript script, CancellationToken ct = default)
     {
         LuabndSource source = Catalog.Locate(script.Luabnd)
@@ -123,6 +126,7 @@ public sealed class ProjectSession
 
         entry.SetText(text);
         byte[] packed = archive.ToPackedBytes(); // build before touching disk
+        using var own = WriteTracker.Track(hasUnpacked ? [packedPath, unpackedDir] : [packedPath]);
         var written = new List<string>();
         AtomicFile.WriteAllBytes(packedPath, packed);
         written.Add(packedPath);
@@ -163,6 +167,7 @@ public sealed class ProjectSession
                 if (File.Exists(packedPath) && File.GetAttributes(packedPath).HasFlag(FileAttributes.ReadOnly))
                     throw new ReadOnlyFileException(Path.GetFullPath(packedPath));
                 Backups.BackupBeforeSave([packedPath]);
+                using var own = WriteTracker.Track(packedPath);
                 AtomicFile.WriteAllBytes(packedPath, bytes);
                 // The .dcx now holds exactly the folder's content: give it the folder's newest time so the folder reads
                 // "in sync" (not ".dcx is newer"), and an older unpacked file never looks newer than this repack.
@@ -194,6 +199,7 @@ public sealed class ProjectSession
                 if (!File.Exists(source)) throw new FileNotFoundException($"{luabnd}.luabnd.dcx not found in the mod or the game.");
                 LuabndArchive archive = LuabndArchive.LoadPacked(source);
                 EnsureWritable([Path.Combine(dir, WitchyBnd4Manifest.FileName)]);
+                using var own = WriteTracker.Track(dir);
                 var files = archive.UnpackTo(dir, luabnd + ".luabnd.dcx");
                 if (source == modPacked)
                 {
