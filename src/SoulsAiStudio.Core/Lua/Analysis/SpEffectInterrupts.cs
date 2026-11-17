@@ -8,8 +8,9 @@ namespace SoulsAiStudio.Core.Lua.Analysis;
 /// <param name="Condition">The arm's full condition (may add e.g. <c>and interruptRand &lt;= 75</c> or a timer check).</param>
 /// <param name="NonRandomCondition">The arm condition has a game-state part that is neither random nor distance (timer, HasSpecialEffectId, HP…).</param>
 /// <param name="DependsOnDistance">The arm condition or a branch in its body tests the distance to the target (a value traced back to a GetDist… call, whatever the variable is named).</param>
+/// <param name="OuterDistance">The arm's own condition (<c>== S and dist &lt;= 3</c>) tests the distance; distance tests only inside its body do not count.</param>
 /// <param name="EndLine">0-based last line of the arm (the line before the next arm, or one past its last statement).</param>
-public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null, bool NonRandomCondition = false, bool DependsOnDistance = false, int EndLine = -1)
+public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue, bool Replans, IReadOnlyList<ComboNode> Body, string Condition = "", double? Chance = null, bool NonRandomCondition = false, bool DependsOnDistance = false, int EndLine = -1, bool OuterDistance = false)
 {
     /// <summary>Chance (0–100) that the arm fires when the SpEffect activates, from <c>and rand &lt;= N</c> in its
     /// condition; null = no random part (timer/state checks are not counted).</summary>
@@ -33,7 +34,13 @@ public sealed record SpEffectHandler(int SpEffectId, int Line, bool ClearsQueue,
 /// </summary>
 public static class SpEffectInterrupts
 {
-    public sealed record Table(IReadOnlyDictionary<int, SpEffectHandler> Handlers, IReadOnlyDictionary<int, string> Observed);
+    public sealed record Table(IReadOnlyDictionary<int, SpEffectHandler> Handlers, IReadOnlyDictionary<int, string> Observed)
+    {
+        /// <summary>Variables assigned from <c>GetRandam_Int</c> anywhere in the file (goal locals and the interrupt's rolls).</summary>
+        public IReadOnlySet<string> RandomVars { get; init; } = new HashSet<string>();
+        /// <summary>Variables assigned from <c>GetSpecialEffectActivateInterruptType</c> (compared to SpEffect ids).</summary>
+        public IReadOnlySet<string> SpEffectVars { get; init; } = new HashSet<string>();
+    }
 
     public static Table Build(string src) => Build(src, LuaLexer.Tokenize(src), GoalOutline.Build(src));
 
@@ -80,10 +87,10 @@ public static class SpEffectInterrupts
                             HasNonRandomPart(arm.Condition, spVars, randVars, distVars),
                             MentionsDistance(arm.Condition, distVars)
                                 || ComboSequence.Branches(arm.Body).Any(b => b.Arms.Any(x => MentionsDistance(x.Condition, distVars))),
-                            armEnd));
+                            armEnd, MentionsDistance(arm.Condition, distVars)));
                 }
         }
-        return new Table(handlers, observed);
+        return new Table(handlers, observed) { RandomVars = randVars, SpEffectVars = spVars };
     }
 
     /// <summary>

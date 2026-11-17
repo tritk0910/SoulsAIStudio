@@ -49,6 +49,7 @@ namespace DSAnimStudio.ImguiOSD
             BuildMenuBar_030_Simulation(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_040_Animation(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_050_Tools(ref anyItemFocusedInner, ref isAnyMenuExpanded);
+            SoulsAiStudio.App.SasHooks.FmodSoundMenu(ref isAnyMenuExpanded); // [SAS] DSAS 4.9.9 "FMOD Sound" menu
             BuildMenuBar_060_Window(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_070_Help(ref anyItemFocusedInner, ref isAnyMenuExpanded);
             BuildMenuBar_080_SupportMeowmaritus(ref anyItemFocusedInner, ref isAnyMenuExpanded);

@@ -53,6 +53,8 @@ public sealed class LuaCodeEditor
     FocusTarget _target = FocusTarget.Text;
     bool _findOpen;
     bool _caseSensitive;
+    bool _wholeWord;
+    bool _statusIsSwap; // the "Replaced N" status came from Swap
     Coordinates _findOrigin;
     int _findFieldSeenVersion = -1;
     bool _gotoOpen;
@@ -446,6 +448,26 @@ public sealed class LuaCodeEditor
             else if (k.IsPressed(EditorKey.C)) _core.Copy();
             else if (k.IsPressed(EditorKey.X)) { _completion.Close(); _core.Cut(); }
             else if (k.IsPressed(EditorKey.V)) { _completion.Close(); _core.Paste(); }
+
+            // VSCode-style line commands
+            if (k.IsPressed(EditorKey.L)) { _completion.Close(); _core.SelectLineDown(); }
+            if (shift && k.IsPressed(EditorKey.K)) { _completion.Close(); _core.DeleteLines(); }
+            if (k.IsPressed(EditorKey.D)) { _completion.Close(); _core.SelectNextOccurrence(); }
+            if (k.IsPressed(EditorKey.Slash)) { _completion.Close(); _core.ToggleLineComment(); }
+            if (k.IsPressed(EditorKey.BracketRight)) _core.IndentLines(true);
+            if (k.IsPressed(EditorKey.BracketLeft)) _core.IndentLines(false);
+            if (k.IsPressed(EditorKey.Enter)) { _completion.Close(); _core.InsertLine(above: shift); }
+        }
+
+        // Alt+Up/Down: move lines; Shift+Alt+Up/Down: copy lines.
+        if (alt && !ctrl)
+        {
+            int dir = k.IsPressed(EditorKey.Up) ? -1 : k.IsPressed(EditorKey.Down) ? 1 : 0;
+            if (dir != 0)
+            {
+                _completion.Close();
+                if (shift) _core.CopyLines(dir); else _core.MoveLines(dir);
+            }
         }
 
         if (!alt)
@@ -540,7 +562,7 @@ public sealed class LuaCodeEditor
         if (_findField.Version == _findFieldSeenVersion)
             return;
         _findFieldSeenVersion = _findField.Version;
-        _find.SetQuery(_findField.Text, _caseSensitive);
+        _find.SetQuery(_findField.Text, _caseSensitive, _wholeWord);
         if (_find.HasQuery && _find.FindNext(_core.Buffer, _findOrigin, out var s, out var e))
             _core.Select(s, e);
     }
@@ -578,7 +600,32 @@ public sealed class LuaCodeEditor
         int n = _core.ReplaceAll(_find, _replaceField.Text);
         _replaceStatusCount = n;
         _replaceStatusVersion = _core.Buffer.Version;
+        _statusIsSwap = false;
         return n;
+    }
+
+    /// <summary>
+    /// Exchanges the Find text and the Replace text everywhere (e.g. 3001 ↔ 3012) as one undo step, with the same
+    /// Match case / Whole word options. Returns the number of exchanged occurrences.
+    /// </summary>
+    internal int SwapAll()
+    {
+        SyncFindQuery();
+        if (!_find.HasQuery || _replaceField.Text.IsEmpty || _core.ReadOnly)
+            return 0;
+        int n = _core.SwapAll(_find, _replaceField.Text, out _);
+        _replaceStatusCount = n;
+        _replaceStatusVersion = _core.Buffer.Version;
+        _statusIsSwap = true;
+        return n;
+    }
+
+    /// <summary>Find options, as the find bar checkboxes set them (also for tests).</summary>
+    internal void SetFindOptions(bool matchCase, bool wholeWord)
+    {
+        _caseSensitive = matchCase;
+        _wholeWord = wholeWord;
+        _find.SetQuery(_findField.Text, _caseSensitive, _wholeWord);
     }
 
     // ================================================================= text area
@@ -857,7 +904,14 @@ public sealed class LuaCodeEditor
             FindStep(true);
         ImGui.SameLine();
         if (ImGui.Checkbox("Aa", ref _caseSensitive))
-            _find.SetQuery(_findField.Text, _caseSensitive);
+            _find.SetQuery(_findField.Text, _caseSensitive, _wholeWord);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Match case");
+        ImGui.SameLine();
+        if (ImGui.Checkbox("W", ref _wholeWord))
+            _find.SetQuery(_findField.Text, _caseSensitive, _wholeWord);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Match whole word: 3001 does not match inside 30012 or a3001");
         ImGui.SameLine();
 
         Span<char> label = stackalloc char[48];
@@ -892,13 +946,24 @@ public sealed class LuaCodeEditor
             ImGui.SetTooltip("Replace every match, one undo step (Ctrl+Enter in the replace field)");
         if (!canReplace)
             ImGui.EndDisabled();
+        ImGui.SameLine();
+        bool canSwap = canReplace && !_replaceField.Text.IsEmpty;
+        if (!canSwap)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Swap##swap"))
+            SwapAll();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Exchange the two texts everywhere at once: every Find becomes Replace and every Replace becomes Find\n" +
+                             "(e.g. 3001 <-> 3012), one undo step. Tip: turn on W (whole word) for anim ids.");
+        if (!canSwap)
+            ImGui.EndDisabled();
     }
 
     /// <summary>"3 of 17", "- of 17" (selection not on a match), "No results", "Replaced 5"; empty without a query. No allocation.</summary>
     internal int FormatMatchStatus(Span<char> label)
     {
         if (_replaceStatusCount >= 0 && _replaceStatusVersion == _core.Buffer.Version)
-            return Concat(label, "Replaced ", _replaceStatusCount, _replaceStatusCount == 1 ? " match" : " matches");
+            return Concat(label, _statusIsSwap ? "Swapped " : "Replaced ", _replaceStatusCount, _replaceStatusCount == 1 ? " match" : " matches");
         if (!_find.HasQuery)
             return 0;
         int count = _find.CountMatches(_core.Buffer);

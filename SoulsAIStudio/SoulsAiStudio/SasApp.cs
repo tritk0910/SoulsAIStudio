@@ -37,6 +37,7 @@ namespace SoulsAiStudio.App
         private readonly EventFinderPanel _finder;
         private readonly SpEffectLabelsWindow _spLabels;
         private readonly UpdateService _updates;
+        private readonly AnimSlotsWindow _animSlots;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -52,6 +53,7 @@ namespace SoulsAiStudio.App
             _finder = new EventFinderPanel(this);
             _spLabels = new SpEffectLabelsWindow(this);
             _updates = new UpdateService(this);
+            _animSlots = new AnimSlotsWindow(this);
             Bridge.FormatSpEffect = SpEffectText;
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             DSAnimStudio.zzz_NotificationManagerIns.HideNotificationPopups = Settings.HideNotificationPopups;
@@ -197,6 +199,7 @@ namespace SoulsAiStudio.App
             }
             focused |= _finder.Build(); // works with any loaded character, project or not
             focused |= _spLabels.Build();
+            focused |= _animSlots.Build();
             _updates.Build(); // checks GitHub on the first frame when enabled; shows the window when there is an update
             bool inProject = Session != null;
             Layout.ProbeWindows(new[]
@@ -235,10 +238,13 @@ namespace SoulsAiStudio.App
             }
             ImGui.Separator();
             if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
+            if (ImGui.MenuItem($"Save All Scripts ({_editor.DirtyCount})", "", false, _editor.DirtyCount > 0)) _editor.SaveAll();
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
             if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
+            if (ImGui.MenuItem("Swap / Add Animation...", "", false, Bridge.LoadedAnibnd != null)) _animSlots.Open();
             if (ImGui.BeginMenu("Updates"))
             {
                 if (ImGui.MenuItem("Check for Updates...")) _updates.StartCheck(manual: true);
@@ -247,7 +253,6 @@ namespace SoulsAiStudio.App
                 ImGui.TextDisabled($"Current version: {SasHooks.AppVersion}");
                 ImGui.EndMenu();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)...", "", false, Session != null)) _luabnd.Open();
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Unpack a map's .luabnd.dcx into a WitchyBND folder, or repack a Witchy/Yabber folder into the mod's .luabnd.dcx,\n" +
@@ -352,6 +357,11 @@ namespace SoulsAiStudio.App
 
         // ---------- characters (model + animations in DSAS) ----------
 
+        public IReadOnlyList<OpenScript> OpenScripts => _editor.OpenScripts;
+
+        /// <summary>Opens the Swap / Add animation window (Animations panel buttons, Souls AI menu).</summary>
+        public void OpenAnimSlots(bool add) => _animSlots.Open(add);
+
         public SoulsAiStudio.Core.Project.CharacterFiles? ResolveCharacter(ProjectScript script) =>
             Project == null ? null : new SoulsAiStudio.Core.Project.CharacterLocator(Project.GameDir, Project.ModDir).Resolve(script);
 
@@ -405,6 +415,23 @@ namespace SoulsAiStudio.App
             _editor.Open(script);
             if (!_editor.IsOpen) SetLayout(WorkspaceLayout.Ai);
         }
+
+        /// <summary>
+        /// Opens <paramref name="script"/> in a tab (adding it to the project when it is not there yet) and runs
+        /// <paramref name="afterLoad"/> once its text is loaded. Used by the animation swap for scripts that share the character.
+        /// </summary>
+        public void OpenScriptWith(ProjectScript script, Action<OpenScript> afterLoad, bool activate)
+        {
+            if (Project == null) return;
+            if (!Project.Scripts.Any(s => s.Key == script.Key))
+            {
+                Project.Scripts.Add(script);
+                SaveProjectUiState();
+            }
+            _editor.Open(script, afterLoad, activate);
+        }
+
+        public void SaveAllScripts() => _editor.SaveAll();
 
         // ---------- characters of animations-only projects ----------
 

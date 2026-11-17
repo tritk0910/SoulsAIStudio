@@ -6,7 +6,7 @@ using SoulsAiStudio.Editor.Input;
 namespace SoulsAiStudio.Editor.Text;
 
 /// <summary>Headless editor model: text, selection, edits, undo/redo. Unit-testable without ImGui.</summary>
-internal sealed class EditorCore
+internal sealed partial class EditorCore
 {
     public readonly TextBuffer Buffer = new();
     public readonly UndoStack Undo = new();
@@ -271,6 +271,25 @@ internal sealed class EditorCore
         if (ReadOnly)
             return 0;
         int n = find.BuildReplaceAll(Buffer, replacement, out int first, out int last, out string text);
+        if (n == 0)
+            return 0;
+        var keep = _cursor;
+        ReplaceRange(new Coordinates(first, 0), new Coordinates(last, Buffer.GetLineLength(last)), text,
+            after: new SelectionState(keep, keep));
+        return n;
+    }
+
+    /// <summary>
+    /// Exchanges every match of <paramref name="find"/>'s query with every occurrence of <paramref name="other"/>
+    /// (e.g. 3001 ↔ 3012) as ONE undo step. Returns the number of exchanged occurrences; <paramref name="otherCount"/>
+    /// of them were <paramref name="other"/>.
+    /// </summary>
+    public int SwapAll(FindModel find, ReadOnlySpan<char> other, out int otherCount)
+    {
+        otherCount = 0;
+        if (ReadOnly)
+            return 0;
+        int n = find.BuildSwapAll(Buffer, other, out int first, out int last, out string text, out otherCount);
         if (n == 0)
             return 0;
         var keep = _cursor;

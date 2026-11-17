@@ -554,6 +554,7 @@ namespace DSAnimStudio.ImguiOSD
                                         MainTaeScreen.ShowDialogDuplicateToNewTaeSection(proj, category);
                                     }
                                 }
+                                SoulsAiStudio.App.SasHooks.AnimCategoryButtons(); // [SAS] Swap / Add animation
 
 
 

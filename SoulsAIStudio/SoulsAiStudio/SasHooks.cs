@@ -28,6 +28,21 @@ namespace SoulsAiStudio.App
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
 
+        /// <summary>DSAS Animations panel, next to a category's "Properties..." / "Duplicate...": our Swap / Add buttons.</summary>
+        public static void AnimCategoryButtons()
+        {
+            try
+            {
+                ImGui.SameLine();
+                if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Swap...")) App.OpenAnimSlots(add: false);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Swap two animation ids (events, HKX files and the animations that borrow them)");
+                ImGui.SameLine();
+                if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Add Anim...")) App.OpenAnimSlots(add: true);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Add a new empty animation: Override HKX of an existing one, or a .hkx file for this character");
+            }
+            catch (Exception ex) { App.ReportError("Animation slots", ex); }
+        }
+
         /// <summary>
         /// Launch credits screen: our name and the fork's own components on top; DS Anim Studio's credits and thanks
         /// follow unchanged (respect for everyone who built and supported DSAS).
@@ -304,6 +319,13 @@ namespace SoulsAiStudio.App
         {
             try { App.BuildMenus(ref anyItemFocused, ref isAnyMenuExpanded); }
             catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
+        /// <summary>Called from DSAS's menu bar after "Window": the DSAS 4.9.9 "FMOD Sound" menu (dropped in 5.0).</summary>
+        public static void FmodSoundMenu(ref bool isAnyMenuExpanded)
+        {
+            try { SoulsAiStudio.App.FmodSoundMenu.Build(ref isAnyMenuExpanded); }
+            catch (Exception ex) { App.ReportError("FMOD Sound menu", ex); }
         }
 
         /// <summary>Called from the DSAS font build: adds Vietnamese/Latin-extended glyphs (DSAS's DS3 glyph list lacks them).</summary>

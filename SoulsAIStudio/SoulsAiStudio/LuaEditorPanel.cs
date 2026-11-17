@@ -37,6 +37,8 @@ namespace SoulsAiStudio.App
         public Task<(IReadOnlyList<GoalFunction> Outline, ILookup<int, AnimReference> Anims)>? OutlineTask;
         public long OutlineVersion = -1;
         public DateTime LastEdit = DateTime.MinValue;
+        /// <summary>Run once on the UI thread right after the text is loaded (e.g. the Lua part of an animation swap).</summary>
+        public readonly List<Action<OpenScript>> AfterLoad = new();
 
         public Task<SaveResult>? Saving;
         public long SavingVersion;
@@ -82,10 +84,18 @@ namespace SoulsAiStudio.App
         public ProjectScript? ActiveScript => _active?.Script;
         public OpenScript? Active => _active;
         public bool AnyDirty => _open.Any(o => o.IsDirty);
+        /// <summary>Scripts open in tabs (e.g. to rewrite anim ids after a swap).</summary>
+        public IReadOnlyList<OpenScript> OpenScripts => _open;
         public bool ActiveIsDirty => _active?.IsDirty == true;
         public IEnumerable<string> DirtyScriptNames => _open.Where(o => o.IsDirty).Select(o => o.Script.FileName);
 
-        public void Open(ProjectScript script)
+        public void Open(ProjectScript script) => Open(script, null, activate: true);
+
+        /// <summary>
+        /// Opens (or finds) a tab. <paramref name="afterLoad"/> runs on the UI thread once its text is loaded: now if it
+        /// already is, else right after loading (decompiling) finishes.
+        /// </summary>
+        public OpenScript Open(ProjectScript script, Action<OpenScript>? afterLoad, bool activate)
         {
             var existing = _open.FirstOrDefault(o => o.Script.Key == script.Key);
             if (existing == null)
@@ -93,8 +103,23 @@ namespace SoulsAiStudio.App
                 existing = new OpenScript(script, _keys, _completions) { Loading = _app.Session!.OpenAsync(script) };
                 _open.Add(existing);
             }
-            _active = _selectTab = existing;
+            if (afterLoad != null)
+            {
+                if (existing.Doc != null && existing.Loading == null) afterLoad(existing);
+                else existing.AfterLoad.Add(afterLoad);
+            }
+            if (activate || _active == null) _active = _selectTab = existing;
             IsOpen = true;
+            return existing;
+        }
+
+        public int DirtyCount => _open.Count(o => o.IsDirty);
+
+        /// <summary>Saves every tab with unsaved edits (saves of one luabnd are serialized by the session).</summary>
+        public void SaveAll()
+        {
+            if (_app.Project?.IsReadOnly == true) { _app.Notify("Read-only project (no mod folder): scripts can't be saved."); return; }
+            foreach (var o in _open) Save(o);
         }
 
         public void JumpTo(int line) => _active?.Editor.GoToLine(line);
@@ -132,6 +157,12 @@ namespace SoulsAiStudio.App
                 _app.Notify("Read-only project (no mod folder): scripts can't be saved.");
                 return;
             }
+            Save(o);
+        }
+
+        private void Save(OpenScript o)
+        {
+            if (o.Doc == null || o.Saving != null || !o.IsDirty) return;
             o.SavingVersion = o.Editor.Version;
             o.SavingText = o.Editor.Text;
             o.Saving = _app.Session!.SaveAsync(o.Doc, o.SavingText);
@@ -252,14 +283,34 @@ namespace SoulsAiStudio.App
                                                             "\n(the a### part is the script's Anim category, Project panel)");
                 ImGui.SameLine();
             }
-            ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+H replace · Ctrl+Space suggest · Ctrl+G go to line · Ctrl+S save");
+            ImGui.TextDisabled($"Ln {line + 1}, Col {col + 1}   Ctrl+F find · Ctrl+H replace · Ctrl+Space suggest · Ctrl+G go to line · Ctrl+S save · (hover: all shortcuts)");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Alt+Up / Alt+Down          move line(s)\n" +
+                                 "Shift+Alt+Up / Down        copy line(s) up / down\n" +
+                                 "Ctrl+L                     select line (again: next line too)\n" +
+                                 "Ctrl+Shift+K               delete line(s)\n" +
+                                 "Ctrl+Enter / Ctrl+Shift+Enter   new line below / above\n" +
+                                 "Ctrl+/                     comment / uncomment (--)\n" +
+                                 "Ctrl+D                     select word, then next occurrence\n" +
+                                 "Ctrl+] / Ctrl+[  Tab / Shift+Tab   indent / outdent\n" +
+                                 "Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)   undo / redo\n" +
+                                 "Ctrl+F / Ctrl+H / F3 / Shift+F3   find / replace / next / previous\n" +
+                                 "Ctrl+G go to line · Ctrl+Space suggestions · Ctrl+S save");
         }
 
-        private static void BuildStatusLine(OpenScript o)
+        private void BuildStatusLine(OpenScript o)
         {
             if (o.Saving != null) ImGui.TextColored(Theme.Warn, "Saving...");
             else if (o.IsDirty) ImGui.TextColored(Theme.Warn, "● Modified — Ctrl+S to save to the mod folder");
             else ImGui.TextColored(Theme.Ok, "Saved");
+            int dirty = DirtyCount;
+            if (dirty > 1 || (dirty == 1 && !o.IsDirty))
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton($"Save all ({dirty})")) SaveAll();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip((string.Join("\n", DirtyScriptNames.Select(n => "● " + n)) +
+                    "\n\nSaves every modified script tab into the mod folder (backup taken).").Replace("%", "%%"));
+            }
             ImGui.SameLine();
             ImGui.TextDisabled(o.Doc!.WasBytecode ? "  (decompiled from bytecode — saving writes plain text)" : "");
         }
@@ -275,8 +326,20 @@ namespace SoulsAiStudio.App
                     o.Editor.Text = o.Doc.SavedText; // resets undo, marks clean
                     if (o.RestoreLine is int line) { o.Editor.GoToLine(line); o.RestoreLine = null; }
                     o.LastEdit = DateTime.UtcNow - AnalysisDebounce; // analyze immediately
+                    var after = o.AfterLoad.ToList();
+                    o.AfterLoad.Clear();
+                    foreach (var a in after)
+                    {
+                        try { a(o); }
+                        catch (Exception ex) { _app.ReportError($"{o.Script.FileName}: after load", ex); }
+                    }
                 }
-                else o.Error = "Could not open: " + load.Exception?.GetBaseException().Message;
+                else
+                {
+                    o.Error = "Could not open: " + load.Exception?.GetBaseException().Message;
+                    if (o.AfterLoad.Count > 0) _app.ReportError($"{o.Script.FileName}: could not open, its pending change was not applied", load.Exception?.GetBaseException());
+                    o.AfterLoad.Clear();
+                }
             }
 
             if (o.Saving is { IsCompleted: true } save)

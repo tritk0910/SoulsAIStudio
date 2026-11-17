@@ -15,6 +15,11 @@ public enum EditorKey
     F3,     // F3 / Shift+F3  find next / previous
     H,      // Ctrl+H  find + replace
     Space,  // Ctrl+Space  suggestions
+    L,      // Ctrl+L  select line
+    K,      // Ctrl+Shift+K  delete line
+    D,      // Ctrl+D  select word / next occurrence
+    Slash,  // Ctrl+/  toggle comment
+    BracketLeft, BracketRight, // Ctrl+[ / Ctrl+]  outdent / indent
     Count,
 }
 
@@ -97,6 +102,12 @@ public class ImGuiKeyInput : IKeyInput
         EditorKey.F3 => ImGuiKey.F3,
         EditorKey.H => ImGuiKey.H,
         EditorKey.Space => ImGuiKey.Space,
+        EditorKey.L => ImGuiKey.L,
+        EditorKey.K => ImGuiKey.K,
+        EditorKey.D => ImGuiKey.D,
+        EditorKey.Slash => ImGuiKey.Slash,
+        EditorKey.BracketLeft => ImGuiKey.LeftBracket,
+        EditorKey.BracketRight => ImGuiKey.RightBracket,
         _ => ImGuiKey.None,
     };
 }
