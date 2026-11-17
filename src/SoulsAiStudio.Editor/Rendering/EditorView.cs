@@ -132,6 +132,8 @@ internal sealed class EditorView
         var selEnd = _core.SelectionEnd;
         bool hasSel = selStart != selEnd;
         var cursor = _core.Cursor;
+        int extras = _core.ExtraCount;
+        int extraFrom = extras == 0 ? 0 : _core.FirstExtraEndingAtOrAfter(first); // sorted, non-overlapping
 
         Span<int> matchStarts = stackalloc int[MaxMatchesPerLine];
         int queryLen = _find.Query.Length;
@@ -177,6 +179,30 @@ internal sealed class EditorView
                 float x2 = textX0 + ColumnToX(chars, c2, m);
                 if (lineNo != selEnd.Line)
                     x2 += spaceW; // show the selected line break
+                if (x2 > x1)
+                    sink.Rect(new Vector2(x1, y), new Vector2(x2, y + lineH), pal.Selection);
+            }
+
+            // secondary selections (multi-cursor): only the carets touching this line, no allocation
+            while (extraFrom < extras && _core.GetExtra(extraFrom).End.Line < lineNo)
+                extraFrom++;
+            for (int x = extraFrom; x < extras; x++)
+            {
+                var c = _core.GetExtra(x);
+                if (c.Start.Line > lineNo)
+                    break;
+                if (c.IsEmpty)
+                    continue;
+                var s1 = c.Start;
+                var s2 = c.End;
+                if (lineNo < s1.Line || lineNo > s2.Line)
+                    continue;
+                int c1 = lineNo == s1.Line ? s1.Column : 0;
+                int c2 = lineNo == s2.Line ? s2.Column : chars.Length;
+                float x1 = textX0 + ColumnToX(chars, c1, m);
+                float x2 = textX0 + ColumnToX(chars, c2, m);
+                if (lineNo != s2.Line)
+                    x2 += spaceW;
                 if (x2 > x1)
                     sink.Rect(new Vector2(x1, y), new Vector2(x2, y + lineH), pal.Selection);
             }
@@ -241,6 +267,20 @@ internal sealed class EditorView
             {
                 float cx = textX0 + ColumnToX(chars, cursor.Column, m);
                 sink.Rect(new Vector2(cx, y), new Vector2(cx + 2f, y + lineH), pal.Cursor);
+            }
+            if (f.Focused && f.CursorVisible)
+            {
+                for (int x = extraFrom; x < extras; x++)
+                {
+                    var k = _core.GetExtra(x);
+                    if (k.Start.Line > lineNo)
+                        break;
+                    var c = k.Cursor;
+                    if (c.Line != lineNo)
+                        continue;
+                    float cx = textX0 + ColumnToX(chars, c.Column, m);
+                    sink.Rect(new Vector2(cx, y), new Vector2(cx + 2f, y + lineH), pal.Cursor);
+                }
             }
         }
 

@@ -3,7 +3,8 @@ namespace SoulsAiStudio.Editor.Text;
 /// <summary>
 /// VSCode-style line commands: move / copy lines (Alt+Up/Down, Shift+Alt+Up/Down), delete lines (Ctrl+Shift+K),
 /// select line (Ctrl+L), insert line below/above (Ctrl+Enter / Ctrl+Shift+Enter), toggle <c>--</c> comment (Ctrl+/),
-/// select word / next occurrence (Ctrl+D). Each command is one undo step.
+/// select word / add next occurrence (Ctrl+D). Each command is one undo step. Line commands act on the primary
+/// selection only and drop secondary carets (see EditorCore.MultiCursor).
 /// </summary>
 internal sealed partial class EditorCore
 {
@@ -202,36 +203,45 @@ internal sealed partial class EditorCore
     }
 
     /// <summary>
-    /// Ctrl+D: with no selection, selects the word at the cursor; with a single-line selection, selects the next
-    /// occurrence of the same text (case-sensitive, wraps). The editor has a single selection, so it moves rather than adds.
+    /// Ctrl+D: with no selection, selects the word at the cursor; with a single-line selection, ADDS the next
+    /// occurrence of the same text (case-sensitive, wraps, skips occurrences already selected) as a new selection that
+    /// becomes the primary one. Returns false when every occurrence is already selected.
     /// </summary>
     public bool SelectNextOccurrence()
     {
         if (!HasSelection)
         {
-            var (s, e) = WordRangeAt(_cursor);
-            if (s == e)
+            var (ws, we) = WordRangeAt(_cursor);
+            if (ws == we)
                 return false;
-            Select(s, e);
+            var keep = _extras.ToArray();
+            Select(ws, we);
+            _extras.AddRange(keep);
+            Normalize();
             return true;
         }
         if (SelectionStart.Line != SelectionEnd.Line)
             return false;
         string q = GetSelectedText();
-        int lines = Buffer.LineCount;
+        var occ = Occurrences(q);
+        if (occ.Count == 0)
+            return false;
         var from = SelectionEnd;
-        for (int k = 0; k <= lines; k++)
+        int first = occ.FindIndex(p => p >= from);
+        if (first < 0)
+            first = 0;
+        for (int k = 0; k < occ.Count; k++)
         {
-            int line = (from.Line + k) % lines;
-            var span = Buffer.GetLineSpan(line);
-            int startCol = k == 0 ? from.Column : 0;
-            if (startCol > span.Length)
+            var s = occ[(first + k) % occ.Count];
+            var e = new Coordinates(s.Line, s.Column + q.Length);
+            if (IsSelected(s, e))
                 continue;
-            int idx = span[startCol..].IndexOf(q.AsSpan(), StringComparison.Ordinal);
-            if (idx < 0)
-                continue;
-            var s = new Coordinates(line, startCol + idx);
-            Select(s, new Coordinates(line, s.Column + q.Length));
+            _extras.Add(new Caret(_anchor, _cursor, _preferredColumn));
+            _anchor = s;
+            _cursor = e;
+            _preferredColumn = -1;
+            Normalize();
+            ScrollToCursorRequested = true;
             return true;
         }
         return false;

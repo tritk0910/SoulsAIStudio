@@ -162,6 +162,80 @@ public sealed class LuaCodeEditor
         return ok;
     }
 
+    /// <summary>Selects [startColumn, endColumn) of <paramref name="line"/> (0-based), centers it and focuses the editor.</summary>
+    public void SelectRange(int line, int startColumn, int endColumn)
+    {
+        line = Math.Clamp(line, 0, _core.Buffer.LineCount - 1);
+        _core.Select(new Coordinates(line, startColumn), new Coordinates(line, endColumn));
+        _scrollCenterLine = line;
+        _focusRequested = true;
+        _target = FocusTarget.Text;
+    }
+
+    /// <summary>Text of one line (0-based; allocates). Empty when out of range.</summary>
+    public string GetLineText(int line) =>
+        line >= 0 && line < _core.Buffer.LineCount ? new string(_core.Buffer.GetLineSpan(line)) : "";
+
+    /// <summary>
+    /// Replaces every occurrence of <paramref name="find"/> with <paramref name="replacement"/> (same matching as the
+    /// find bar) as ONE undo step, for edits made from outside (Find in Scripts). Raises <see cref="TextChanged"/>.
+    /// Returns the number of replacements.
+    /// </summary>
+    public int ReplaceAllText(string find, string replacement, bool matchCase, bool wholeWord) =>
+        ExternalFindEdit(find, replacement, matchCase, wholeWord, swap: false);
+
+    /// <summary>Exchanges every <paramref name="a"/> with <paramref name="b"/> and back (find bar Swap) as ONE undo step.</summary>
+    public int SwapAllText(string a, string b, bool matchCase, bool wholeWord) =>
+        ExternalFindEdit(a, b, matchCase, wholeWord, swap: true);
+
+    int ExternalFindEdit(string find, string other, bool matchCase, bool wholeWord, bool swap)
+    {
+        if (_core.ReadOnly || string.IsNullOrEmpty(find))
+            return 0;
+        _completion.Close();
+        var model = new FindModel();
+        model.SetQuery(find, matchCase, wholeWord);
+        long v = Version;
+        int n = swap ? _core.SwapAll(model, other, out _) : _core.ReplaceAll(model, other);
+        _core.ScrollToCursorRequested = false;
+        if (v != Version)
+            TextChanged?.Invoke();
+        _lastVersion = Version;
+        return n;
+    }
+
+    bool _findInFilesRequested;
+    string _findInFilesSeed = "";
+
+    void RequestFindInFiles()
+    {
+        _completion.Close();
+        _findInFilesRequested = true;
+        if (_core.HasSelection && _core.SelectionStart.Line == _core.SelectionEnd.Line)
+            _findInFilesSeed = _core.GetSelectedText();
+        else
+        {
+            var (s, e) = _core.WordRangeAt(_core.Cursor);
+            _findInFilesSeed = s != e && EditorCore.IsWordChar(_core.Buffer.GetLineSpan(s.Line)[s.Column]) ? _core.Buffer.GetText(s, e) : "";
+        }
+    }
+
+    /// <summary>
+    /// True once after Ctrl+Shift+F was pressed in this editor; <paramref name="seed"/> = the selected text or the word
+    /// at the cursor (may be empty). The host opens its "Find in Scripts" panel.
+    /// </summary>
+    public bool TryTakeFindInFilesRequest(out string seed)
+    {
+        seed = _findInFilesSeed;
+        if (!_findInFilesRequested)
+            return false;
+        _findInFilesRequested = false;
+        return true;
+    }
+
+    /// <summary>Number of carets (1 + secondary carets from Ctrl+D / Alt+Click / Ctrl+Alt+Up/Down).</summary>
+    public int CaretCount => _core.CaretCount;
+
     public void Undo()
     {
         _completion.Close();
@@ -306,7 +380,9 @@ public sealed class LuaCodeEditor
 
         // Ctrl+F / Ctrl+H / Ctrl+G switch the target; chars typed later in the same frame (fast typists, SendKeys)
         // continue into the newly opened field instead of being dropped.
-        if (ctrl && !alt && k.IsPressed(EditorKey.F))
+        if (ctrl && !alt && shift && k.IsPressed(EditorKey.F))
+            RequestFindInFiles();
+        else if (ctrl && !alt && k.IsPressed(EditorKey.F))
             OpenFind(replace: false);
         else if (ctrl && !alt && k.IsPressed(EditorKey.H))
             OpenFind(replace: true);
@@ -318,6 +394,8 @@ public sealed class LuaCodeEditor
         {
             if (_target == FocusTarget.Text && _completion.IsOpen)
                 _completion.Close(); // Escape closes the popup first, the bars on the next press
+            else if (_target == FocusTarget.Text && _core.HasExtras)
+                _core.CollapseToPrimary(); // then the secondary carets
             else if (_findOpen || _gotoOpen)
             {
                 CloseBars();
@@ -450,13 +528,24 @@ public sealed class LuaCodeEditor
             else if (k.IsPressed(EditorKey.V)) { _completion.Close(); _core.Paste(); }
 
             // VSCode-style line commands
-            if (k.IsPressed(EditorKey.L)) { _completion.Close(); _core.SelectLineDown(); }
+            if (k.IsPressed(EditorKey.L)) { _completion.Close(); if (shift) _core.SelectAllOccurrences(); else _core.SelectLineDown(); }
             if (shift && k.IsPressed(EditorKey.K)) { _completion.Close(); _core.DeleteLines(); }
             if (k.IsPressed(EditorKey.D)) { _completion.Close(); _core.SelectNextOccurrence(); }
             if (k.IsPressed(EditorKey.Slash)) { _completion.Close(); _core.ToggleLineComment(); }
             if (k.IsPressed(EditorKey.BracketRight)) _core.IndentLines(true);
             if (k.IsPressed(EditorKey.BracketLeft)) _core.IndentLines(false);
             if (k.IsPressed(EditorKey.Enter)) { _completion.Close(); _core.InsertLine(above: shift); }
+        }
+
+        // Ctrl+Alt+Up/Down: add a caret above / below.
+        if (alt && ctrl)
+        {
+            int dir = k.IsPressed(EditorKey.Up) ? -1 : k.IsPressed(EditorKey.Down) ? 1 : 0;
+            if (dir != 0)
+            {
+                _completion.Close();
+                _core.AddCaretVertical(dir);
+            }
         }
 
         // Alt+Up/Down: move lines; Shift+Alt+Up/Down: copy lines.
@@ -513,7 +602,9 @@ public sealed class LuaCodeEditor
             typed = true;
         }
 
-        if (ctrlSpace)
+        if (_core.HasExtras)
+            _completion.Close(); // suggestions work with a single caret only
+        else if (ctrlSpace)
             _completion.OpenExplicit();
         else if (typed)
             _completion.OnTyped();
@@ -804,6 +895,11 @@ public sealed class LuaCodeEditor
             else if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
             {
                 _core.SelectWordAt(pos);
+            }
+            else if (KeyInput.Alt && !KeyInput.Shift && !KeyInput.Ctrl)
+            {
+                _core.AddCaret(pos); // Alt+Click: add a caret
+                return;
             }
             else
             {
