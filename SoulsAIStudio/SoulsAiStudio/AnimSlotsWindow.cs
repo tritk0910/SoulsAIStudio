@@ -79,10 +79,10 @@ namespace SoulsAiStudio.App
                 if (AnimSlotsBridge.WhyUnavailable(_app) is { } why) { ImGui.TextColored(Theme.Warn, why.Replace("%", "%%")); return focused; }
                 if (_snap == null || DateTime.UtcNow - _snapTime > TimeSpan.FromSeconds(1)) { _snap = AnimSlotsBridge.Read(); _snapTime = DateTime.UtcNow; }
                 if (_snap == null) { ImGui.TextDisabled("Load a character first."); return focused; }
-                ImGui.TextDisabled($"{Path.GetFileName(_app.Bridge.LoadedAnibnd ?? "")}: changes are saved into this anibnd with Ctrl+S. Undo: Edit > Undo [Global] Action (Ctrl+Shift+Z).");
+                ImGui.TextDisabled($"{Path.GetFileName(_app.Bridge.LoadedAnibnd ?? "")}: changes are saved into this anibnd with Ctrl+S. Undo a swap: \"Undo last swap\" (Swap tab), or Edit > Undo [Global] Action (Ctrl+Shift+Z).");
                 if (ImGui.BeginTabBar("##sas_animslots_tabs"))
                 {
-                    if (ImGui.BeginTabItem("Swap")) { DrawSwap(); ImGui.EndTabItem(); }
+                    if (ImGui.BeginTabItem("Swap")) { DrawSwapHistory(); DrawSwap(); ImGui.EndTabItem(); }
                     if (BeginTab("Add", _selectAdd)) { DrawAdd(); ImGui.EndTabItem(); }
                     _selectAdd = false;
                     ImGui.EndTabBar();
@@ -354,7 +354,12 @@ namespace SoulsAiStudio.App
         {
             try
             {
-                AnimSlotsBridge.ApplySwap(plan, _keepRefs);
+                var record = new AnimSwapRecord(plan.A, plan.B, DateTime.Now);
+                var entry = new SwapEntry(record, _app.Project);
+                entry.Handle = AnimSlotsBridge.ApplySwap(plan, _keepRefs, onUndo: () => OnSwapUndoRedo(entry, undo: true), onRedo: () => OnSwapUndoRedo(entry, undo: false));
+                _history.Add(record);
+                _entries.Insert(0, entry);
+                if (_entries.Count > _history.Capacity) _entries.RemoveRange(_history.Capacity, _entries.Count - _history.Capacity);
                 int luaEdits = 0, scripts = 0, opening = 0;
                 if (_swapLua && _app.Project is { IsAnimationsOnly: false } && _luaRows is { } rows)
                 {
@@ -366,14 +371,17 @@ namespace SoulsAiStudio.App
                         var open = _app.OpenScripts.FirstOrDefault(o => o.Script.Key == r.Key);
                         if (open?.Doc != null && open.Loading == null)
                         {
-                            int n = SwapIn(open, la, lb);
+                            int n = SwapIn(open, la, lb, record);
                             if (n > 0) { luaEdits += n; scripts++; }
                             continue;
                         }
                         if (!r.Shared.InProject) r.Script.AnimCategory = r.Category;
+                        record.Pending++;
                         _app.OpenScriptWith(r.Script, o =>
                         {
-                            int n = SwapIn(o, la, lb);
+                            record.Pending--;
+                            if (record.IsUndone) { _app.Notify($"{o.Script.FileName}: the swap was undone before it opened, its ids were left as they are."); return; }
+                            int n = SwapIn(o, la, lb, record);
                             _app.Notify($"{o.Script.FileName}: swapped {n} anim id{(n == 1 ? "" : "s")} ({la} <-> {lb}), not saved yet.");
                         }, activate: false);
                         opening++;
@@ -381,7 +389,8 @@ namespace SoulsAiStudio.App
                 }
                 string lua = (luaEdits > 0 ? $" and {luaEdits} anim ids in {scripts} open script{(scripts == 1 ? "" : "s")}" : "")
                              + (opening > 0 ? $"; opening {opening} more script{(opening == 1 ? "" : "s")} with the change" : "");
-                _app.Notify($"Swapped {AnimSlots.IdName(plan.A)} <-> {AnimSlots.IdName(plan.B)}{lua}. Nothing is saved yet: Ctrl+S for the anibnd, Save all for the scripts.");
+                _app.Notify($"Swapped {AnimSlots.IdName(plan.A)} <-> {AnimSlots.IdName(plan.B)}{lua}. Nothing is saved yet: Ctrl+S for the anibnd, Save all for the scripts. " +
+                            "Undo all of it with \"Undo last swap\" (Animation Slots window, Souls AI menu) or Undo [Global] Action.");
                 (_a, _b) = (_b, _a);
             }
             catch (Exception ex) { _app.ReportError("Swap animations", ex); }
@@ -389,11 +398,117 @@ namespace SoulsAiStudio.App
             _planKey = null;
         }
 
-        /// <summary>Swaps the two ids in an open script as one undo step. Returns how many literals changed.</summary>
-        private static int SwapIn(OpenScript o, int la, int lb)
+        /// <summary>
+        /// Swaps the two ids in an open script as one editor undo step; records it in <paramref name="record"/> (with the
+        /// ids' counts before, to recognise the state later). Returns how many literals changed.
+        /// </summary>
+        private static int SwapIn(OpenScript o, int la, int lb, AnimSwapRecord? record)
         {
-            if (AnimSlots.SwapLuaAnimIds(o.Editor.Text, la, lb, out int n) is not { } e) return 0;
-            return o.Editor.ApplyEdit(e.StartLine, e.StartColumn, e.EndLine, e.EndColumn, e.Text) ? n : 0;
+            string text = o.Editor.Text;
+            if (AnimSlots.SwapLuaAnimIds(text, la, lb, out int n) is not { } e) return 0;
+            var change = record != null ? SwapScriptChange.Measure(o.Script, text, la, lb) : null;
+            if (!o.Editor.ApplyEdit(e.StartLine, e.StartColumn, e.EndLine, e.EndColumn, e.Text)) return 0;
+            if (change != null) record!.AddScript(change);
+            return n;
+        }
+
+        // ---------------------------------------------------------------- swap: one undo for TAE/HKX + Lua
+
+        /// <summary>A recorded swap with its DSAS global undo action and the project it was made in.</summary>
+        private sealed class SwapEntry(AnimSwapRecord record, object? project)
+        {
+            public AnimSwapRecord Record { get; } = record;
+            public object? Project { get; } = project;
+            public AnimSlotsBridge.SwapHandle? Handle;
+        }
+
+        private readonly AnimSwapHistory _history = new(capacity: 10);
+        private readonly List<SwapEntry> _entries = new();
+
+        /// <summary>
+        /// DSAS undid / redid the swap's global action (Ctrl+Shift+Z/Y, Edit menu, or "Undo last swap"): the Lua part
+        /// follows. A swap is its own inverse, so both apply the same id swap again to each script's current text.
+        /// </summary>
+        private void OnSwapUndoRedo(SwapEntry entry, bool undo)
+        {
+            var rec = entry.Record;
+            rec.IsUndone = undo;
+            _snap = null;
+            _planKey = null;
+            string verb = undo ? "Undid" : "Redid";
+            if (rec.Scripts.Count == 0) { _app.Notify($"{verb} swap {rec.Description}."); return; }
+            if (_app.Project == null || !ReferenceEquals(_app.Project, entry.Project))
+            {
+                _app.ReportError($"{verb} swap {rec.Description}", new InvalidOperationException(
+                    "The anibnd part was " + (undo ? "undone" : "redone") + ", but the project with its scripts is no longer open, so these Lua ids were not changed: " +
+                    string.Join(", ", rec.Scripts.Select(c => $"{c.Script.FileName} ({c.LuaA} <-> {c.LuaB})"))));
+                return;
+            }
+            var notes = new List<string>();
+            foreach (var c in rec.Scripts)
+            {
+                bool wasOpen = _app.OpenScripts.Any(o => o.Script.Key == c.Key && o.Doc != null && o.Loading == null);
+                // Open: runs now. Closed meanwhile: reopened as a tab (unsaved change), runs once it has loaded.
+                _app.OpenScriptWith(c.Script, o =>
+                {
+                    string note = $"{o.Script.FileName}: {ApplyRecorded(o, c, undo)}";
+                    if (wasOpen) notes.Add(note);
+                    else _app.Notify($"{verb} swap {rec.Description}: {o.Script.FileName} had been closed, reopened it. {note}");
+                }, activate: false);
+            }
+            _app.Notify($"{verb} swap {rec.Description} in the anibnd" + (notes.Count > 0 ? " and Lua: " + string.Join("; ", notes) : "") + ". Not saved yet.");
+        }
+
+        private static string ApplyRecorded(OpenScript o, SwapScriptChange c, bool undo)
+        {
+            var action = c.Decide(o.Editor.Text, undo);
+            if (action == SwapLuaAction.Skip) return $"{c.LuaA} / {c.LuaB} already as wanted, left alone";
+            int n = SwapIn(o, c.LuaA, c.LuaB, null);
+            string done = $"swapped {n} id{(n == 1 ? "" : "s")} ({c.LuaA} <-> {c.LuaB})";
+            return action == SwapLuaAction.ApplyUnsure ? done + " (these ids were edited since the swap: check it)" : done;
+        }
+
+        private SwapEntry? LastApplied() => _history.LastApplied is { } r ? _entries.FirstOrDefault(e => e.Record == r) : null;
+
+        /// <summary>Why "Undo last swap" can't run now, or null.</summary>
+        public string? WhyCantUndoLastSwap()
+        {
+            if (LastApplied() is not { Handle: { } h } e) return "No swap to undo.";
+            if (e.Record.Pending > 0) return "Scripts of this swap are still opening.";
+            return AnimSlotsBridge.WhyCantUndo(h);
+        }
+
+        /// <summary>Undoes the last swap (anibnd + its Lua scripts) as one step, without DSAS's confirmation dialog.</summary>
+        public void UndoLastSwap()
+        {
+            if (LastApplied() is not { Handle: { } h } e) { _app.Notify("No animation swap to undo."); return; }
+            if (WhyCantUndoLastSwap() is { } why) { _app.Notify($"Can't undo swap {e.Record.Description}: {why}"); return; }
+            try { AnimSlotsBridge.Undo(h); } // its undo callback reverts the Lua part next frame
+            catch (Exception ex) { _app.ReportError("Undo swap", ex); }
+        }
+
+        private void DrawSwapHistory()
+        {
+            string? why = WhyCantUndoLastSwap();
+            var last = _history.LastApplied;
+            ImGui.BeginDisabled(why != null);
+            if (ImGui.Button(last != null ? $"Undo last swap ({last.Description})" : "Undo last swap")) UndoLastSwap();
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip((why ?? "Undo the swap in the anibnd and in every script it changed, as one step.\n" +
+                                  "Edit > Undo [Global] Action (Ctrl+Shift+Z) does the same; Redo [Global] re-applies both.").Replace("%", "%%"));
+            if (_history.Recent.Count == 0) { ImGui.Separator(); return; }
+            if (!ImGui.TreeNode($"Recent swaps ({_history.Recent.Count})##sas_swaphist")) { ImGui.Separator(); return; }
+            foreach (var r in _history.Recent)
+            {
+                string scripts = r.Scripts.Count == 0 ? "no Lua" : string.Join(", ", r.Scripts.Select(c => $"{c.Script.FileName} ({c.LuaA} <-> {c.LuaB})"));
+                if (r.Pending > 0) scripts += $" (+{r.Pending} opening)";
+                string line = $"{r.Time:HH:mm:ss}  {r.Description}  -  {scripts}";
+                if (r.IsUndone) ImGui.TextDisabled(line + "  [undone]");
+                else ImGui.TextUnformatted(line);
+            }
+            ImGui.TreePop();
+            ImGui.Separator();
         }
 
         // ---------------------------------------------------------------- add
