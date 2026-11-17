@@ -211,7 +211,7 @@ internal sealed partial class EditorCore
     {
         if (!HasSelection)
         {
-            var (ws, we) = WordRangeAt(_cursor);
+            var (ws, we) = WordNearCursor(_cursor);
             if (ws == we)
                 return false;
             var keep = _extras.ToArray();

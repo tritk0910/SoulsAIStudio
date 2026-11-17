@@ -81,6 +81,21 @@ internal sealed partial class EditorCore
 
     public static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_' || c > 127 && !char.IsWhiteSpace(c);
 
+    /// <summary>
+    /// Word for Ctrl+D (VSCode): the word under the cursor, or the word just left of it when the cursor sits right after a
+    /// word (e.g. after <c>3060</c> in <c>3060,</c>). Empty range when neither side is a word.
+    /// </summary>
+    public (Coordinates Start, Coordinates End) WordNearCursor(Coordinates pos)
+    {
+        var line = Buffer.GetLineSpan(pos.Line);
+        int col = Math.Min(pos.Column, line.Length);
+        bool here = col < line.Length && IsWordChar(line[col]);
+        bool left = col > 0 && IsWordChar(line[col - 1]);
+        if (!here && !left)
+            return (pos, pos);
+        return WordRangeAt(here ? new Coordinates(pos.Line, col) : new Coordinates(pos.Line, col - 1));
+    }
+
     public (Coordinates Start, Coordinates End) WordRangeAt(Coordinates pos)
     {
         var line = Buffer.GetLineSpan(pos.Line);

@@ -155,3 +155,16 @@ public class LineCommandTests
         Assert.Equal(Code, e.Text);
     }
 }
+
+public class CtrlDWordLeftTests
+{
+    [Fact]
+    public void CtrlD_RightAfterAWord_SelectsThatWord()
+    {
+        var e = new LuaCodeEditor { Clipboard = new MemoryClipboard() };
+        e.Text = "f(10, 3060, X)";
+        e.Core.SetCursor((0, 10)); // just after 3060, before ','
+        e.Core.SelectNextOccurrence();
+        Assert.Equal("3060", e.Core.GetSelectedText());
+    }
+}
