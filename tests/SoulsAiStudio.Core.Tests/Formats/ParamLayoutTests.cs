@@ -32,6 +32,57 @@ public class ParamLayoutTests(ITestOutputHelper output)
         Assert.Equal(SekiroParamOffsets.SpEffectRowSize, layout.RowSize);
     }
 
+    [Fact]
+    public void AtkAndBullet_SpEffectFields_HaveOffsets()
+    {
+        var atk = ParamLayout.FromXml(DefPath("AtkParam"));
+        Assert.Equal(SekiroParamOffsets.AtkRowSize, atk.RowSize);
+        var bullet = ParamLayout.FromXml(DefPath("BulletParam"));
+        Assert.Equal(SekiroParamOffsets.BulletRowSize, bullet.RowSize);
+        for (int i = 0; i < SekiroParamOffsets.SpEffectIdCount; i++)
+        {
+            Assert.Equal(SekiroParamOffsets.AtkSpEffectId0 + 4 * i, atk.Require("spEffectId" + i).Offset);
+            Assert.Equal(PARAMDEF.DefType.s32, atk.Require("spEffectId" + i).Type);
+            Assert.Equal(SekiroParamOffsets.BulletSpEffectId0 + 4 * i, bullet.Require("spEffectId" + i).Offset);
+        }
+        Assert.Equal(SekiroParamOffsets.BulletAtkId, bullet.Require("atkId_Bullet").Offset);
+        Assert.Equal(SekiroParamOffsets.BulletSpEffectIdForShooter, bullet.Require("spEffectIDForShooter").Offset);
+        var beh = ParamLayout.FromXml(DefPath("BehaviorParam"));
+        Assert.Equal(0x9, beh.Require("refType").Offset); // what DSAS's BehaviorParam reader uses
+        Assert.Equal(0xC, beh.Require("refId").Offset);
+    }
+
+    [RequiresSekiroInstallTheory]
+    [InlineData("AtkParam_Npc.param", "AtkParam", new[] { "spEffectId0", "spEffectId1", "spEffectId2", "spEffectId3", "spEffectId4" })]
+    [InlineData("Bullet.param", "BulletParam", new[] { "atkId_Bullet", "spEffectIDForShooter", "spEffectId0", "spEffectId4" })]
+    public void AtkAndBullet_RawOffsets_MatchApplyParamdef_OnGameParam(string fileName, string defName, string[] fields)
+    {
+        if (!OodleSupport.EnsureLoaded()) return;
+        string bndPath = Path.Combine(TestPaths.SekiroInstallDir, "param", "gameparam", "gameparam.parambnd.dcx");
+        if (!File.Exists(bndPath)) return;
+        var bnd = BND4.Read(bndPath);
+        var file = bnd.Files.First(f => f.Name.EndsWith("\\" + fileName, StringComparison.OrdinalIgnoreCase));
+        byte[] raw = file.Bytes.ToArray();
+        var param = PARAM.Read(raw);
+        var def = PARAMDEF.XmlDeserialize(DefPath(defName));
+        param.ApplyParamdef(def);
+        var layout = ParamLayout.FromDef(def);
+        var dataOffset = typeof(PARAM.Row).GetField("DataOffset", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        int nonDefault = 0;
+        foreach (var row in param.Rows)
+        {
+            long start = (long)dataOffset.GetValue(row)!;
+            foreach (string name in fields)
+            {
+                int expected = (int)row[name].Value;
+                Assert.Equal(expected, BitConverter.ToInt32(raw, (int)(start + layout.Require(name).Offset)));
+                if (name == "spEffectId0" && expected > 0) nonDefault++;
+            }
+        }
+        output.WriteLine($"{fileName}: {param.Rows.Count} rows, {nonDefault} with spEffectId0");
+        Assert.True(param.Rows.Count > 100);
+    }
+
     [RequiresSekiroInstallFact]
     public void SpEffect_RawOffsets_MatchApplyParamdef_OnGameParam()
     {

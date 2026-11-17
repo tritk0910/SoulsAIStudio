@@ -40,6 +40,8 @@ public static class SpEffectInterrupts
         public IReadOnlySet<string> RandomVars { get; init; } = new HashSet<string>();
         /// <summary>Variables assigned from <c>GetSpecialEffectActivateInterruptType</c> (compared to SpEffect ids).</summary>
         public IReadOnlySet<string> SpEffectVars { get; init; } = new HashSet<string>();
+        /// <summary>Every target each SpEffect is observed on (a SpEffect can be observed on both <c>TARGET_SELF</c> and <c>TARGET_ENE_0</c>).</summary>
+        public IReadOnlyDictionary<int, IReadOnlyList<string>> ObservedTargets { get; init; } = new Dictionary<int, IReadOnlyList<string>>();
     }
 
     public static Table Build(string src) => Build(src, LuaLexer.Tokenize(src), GoalOutline.Build(src));
@@ -50,6 +52,7 @@ public static class SpEffectInterrupts
         var spVars = new HashSet<string>(StringComparer.Ordinal);
         var randVars = new HashSet<string>(StringComparer.Ordinal);
         var observed = new Dictionary<int, string>();
+        var observedAll = new Dictionary<int, IReadOnlyList<string>>();
         for (int j = 0; j + 6 < t.Count; j++)
         {
             // name = obj : GetSpecialEffectActivateInterruptType (
@@ -63,7 +66,13 @@ public static class SpEffectInterrupts
             // : AddObserveSpecialEffectAttribute ( TARGET , id )
             if (t[j].Is(src, ":") && t[j + 1].Is(src, "AddObserveSpecialEffectAttribute") && t[j + 2].Is(src, "(")
                 && t[j + 4].Is(src, ",") && t[j + 5].Kind == LuaTokenKind.Number && int.TryParse(t[j + 5].Text(src), out int obs))
-                observed[obs] = t[j + 3].Text(src).ToString();
+            {
+                string target = t[j + 3].Text(src).ToString();
+                observed[obs] = target;
+                var list = observedAll.TryGetValue(obs, out var l) ? (List<string>)l : new List<string>();
+                if (!list.Contains(target)) list.Add(target);
+                observedAll[obs] = list;
+            }
         }
 
         var handlers = new Dictionary<int, SpEffectHandler>();
@@ -90,7 +99,7 @@ public static class SpEffectInterrupts
                             armEnd, MentionsDistance(arm.Condition, distVars)));
                 }
         }
-        return new Table(handlers, observed) { RandomVars = randVars, SpEffectVars = spVars };
+        return new Table(handlers, observed) { RandomVars = randVars, SpEffectVars = spVars, ObservedTargets = observedAll };
     }
 
     /// <summary>

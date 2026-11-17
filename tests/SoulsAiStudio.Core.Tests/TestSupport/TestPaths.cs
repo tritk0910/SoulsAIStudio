@@ -118,3 +118,12 @@ public sealed class RequiresSekiroInstallFactAttribute : FactAttribute
         if (!TestPaths.HasSekiroInstall) Skip = $"Sekiro install not found at '{TestPaths.SekiroInstallDir}' (needs unpacked chr/, param/).";
     }
 }
+
+/// <summary>[Theory] that auto-skips unless the real Sekiro install (unpacked, with chr/) is present. Read-only use.</summary>
+public sealed class RequiresSekiroInstallTheoryAttribute : TheoryAttribute
+{
+    public RequiresSekiroInstallTheoryAttribute()
+    {
+        if (!TestPaths.HasSekiroInstall) Skip = $"Sekiro install not found at '{TestPaths.SekiroInstallDir}' (needs unpacked chr/, param/).";
+    }
+}

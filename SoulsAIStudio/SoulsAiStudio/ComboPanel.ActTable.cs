@@ -435,7 +435,7 @@ namespace SoulsAiStudio.App
             var nodes = ComboSequence.Build(o.Editor.Text, g);
             var steps = ComboSequence.Flatten(nodes, DefaultArm);
             if (steps.Count == 0) { _app.Notify($"Goal.{g.Name} adds no anim on its default path: open it to pick branches."); return; }
-            Play(steps.Select(st => new PathItem(st, null)).ToList());
+            Play(steps.Select(st => new ComboPathItem(st, 0, null)).ToList());
         }
 
         private void OpenGoalFromTable(GoalFunction g, string tableGoal)

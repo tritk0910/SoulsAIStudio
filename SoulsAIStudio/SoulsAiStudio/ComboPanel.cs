@@ -13,7 +13,7 @@ namespace SoulsAiStudio.App
     /// Combo window (CLAUDE.md P2). Tab "From Lua": the AddSubGoal sequence of the goal under the cursor with its
     /// if/elseif/else branches and SpEffect interrupt branches; pick a path (or Random) and play it, each anim cut at
     /// "End If AI ComboAttack Queued" or at the chosen SpEffect. Tab "Manual": a typed combo script
-    /// (<see cref="ComboScriptTab"/>, replaces DSAS's Combo Viewer). Not yet: OnHit SpEffect sources (needs params).
+    /// (<see cref="ComboScriptTab"/>, replaces DSAS's Combo Viewer). Interrupt candidates include on-hit SpEffects (AtkParam / Bullet).
     /// </summary>
     public sealed partial class ComboPanel
     {
@@ -21,9 +21,11 @@ namespace SoulsAiStudio.App
         private readonly SasApp _app;
         private readonly LuaEditorPanel _editor;
         private readonly Random _rng = new();
-        private readonly Dictionary<(int Line, int Level), int> _choice = new(); // (branch line, interrupt level) -> arm index
-        private readonly Dictionary<(int Line, int Depth), int> _interrupt = new(); // step -> chosen SpEffect candidate (-1 none)
-        private readonly Dictionary<(int Line, int Depth), float> _trigger = new(); // step -> chosen trigger frame inside the SpEffect window
+        /// <summary>Branch arms, step interrupts and trigger frames chosen by the user (or by Random path).</summary>
+        private readonly ComboChoices _sel = new();
+        private Dictionary<(int Line, int Level), int> _choice => _sel.Arms; // (branch line, interrupt level) -> arm index
+        private Dictionary<(int Line, int Level), int> _interrupt => _sel.Interrupts; // step -> chosen SpEffect candidate (-1 none)
+        private Dictionary<(int Line, int Level), float> _trigger => _sel.Triggers; // step -> chosen trigger frame inside the SpEffect window
         private readonly Dictionary<int, IReadOnlyList<DsasBridge.SpEffectEvent>> _spEvents = new(); // anim -> TAE SpEffects + their cycle SpEffects
         private string? _spEventsAnibnd;
         private SpEffectInterrupts.Table? _handlers;
@@ -44,6 +46,8 @@ namespace SoulsAiStudio.App
         public bool IsOpen = true;
         private readonly ComboScriptTab _manual;
         private bool _selectManual;
+        /// <summary>"Attacks hit": Random path / Statistics may pick on-hit SpEffects (AtkParam / Bullet).</summary>
+        private bool _attacksHit;
 
         public ComboPanel(SasApp app, LuaEditorPanel editor)
         {
@@ -125,10 +129,9 @@ namespace SoulsAiStudio.App
             _cacheKey = key;
             _goal = goal;
             _start = start;
-            _choice.Clear();
-            _interrupt.Clear();
-            _trigger.Clear();
+            _sel.Clear();
             _plan = null;
+            _stats = null;
             _nodes = start != null ? start.Body
                 : goal == null ? Array.Empty<ComboNode>() : ComboSequence.Build(o.Editor.Text, goal);
         }
@@ -236,7 +239,7 @@ namespace SoulsAiStudio.App
             if (CurrentWeightTable() is { } wt) { DrawWeightTable(wt); return; }
 
             string spKey = _app.Bridge.LoadedAnibnd + "|" + _app.ActiveAnimCategory; // the cache holds Lua ids: reset when the category changes
-            if (_spEventsAnibnd != spKey) { _spEvents.Clear(); _spEventsAnibnd = spKey; }
+            if (_spEventsAnibnd != spKey) { _spEvents.Clear(); _behaviorSp.Clear(); _queuedFrames.Clear(); _stats = null; _spEventsAnibnd = spKey; }
             var path = BuildPath(_nodes, 0);
             bool loaded = _app.Bridge.LoadedAnibnd != null;
             if (!loaded) ImGui.TextColored(Theme.Warn, "Load the character first (Project panel → Load model & anims, or click a character).");
@@ -249,7 +252,10 @@ namespace SoulsAiStudio.App
                 "time order (before ComboAttack Queued). At each one Goal.Interrupt is rolled right there, with one\n" +
                 "interruptRand shared by its condition and the ifs inside; a miss lets the anim go on to the next one.\n" +
                 "Timers / SpEffect / HP checks and distance tests inside an arm count as 50/50.\n" +
-                "Arms whose own condition tests the distance are never picked: choose them yourself.");
+                "Arms whose own condition tests the distance are never picked: choose them yourself.\n" +
+                "On-hit SpEffects (AtkParam / Bullet) only count with \"Attacks hit\" on.");
+            ImGui.SameLine();
+            DrawStatisticsButton();
             ImGui.SameLine();
             if (ImGui.Button(_app.Bridge.ComboPaused ? "▶ Resume" : "|| Pause")) _app.Bridge.ToggleComboPause();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Space also pauses/resumes the combo");
@@ -267,6 +273,8 @@ namespace SoulsAiStudio.App
             ImGui.TextDisabled(path.Count == 0 ? "no anims in this path"
                 : string.Join(" → ", path.Select(p => p.Cut != null ? p.Step.AnimId + " (SpEffect cut)" : p.Step.AnimId.ToString())));
 
+            DrawStatistics();
+            ComputeHasNext();
             ImGui.Separator();
             ImGui.BeginChild("##sas_combo_tree", new Vector2(0, _plan != null ? -110 : 0), false);
             int? cutBy = null;
@@ -290,28 +298,14 @@ namespace SoulsAiStudio.App
             else if (h.HasStateCondition) ImGui.TextDisabled("[conditional] the arm also checks game state (timer, SpEffect, HP...).");
         }
 
-        private readonly Dictionary<int, Func<ComboBranch, int>> _armsAt = new();
-
         /// <summary>Arm chooser for branches at an interrupt level (0 = the goal, 1 = a handler run from it, …).</summary>
-        private Func<ComboBranch, int> Arms(int level)
-        {
-            if (!_armsAt.TryGetValue(level, out var f))
-                _armsAt[level] = f = b => _choice.TryGetValue((b.Line, level), out int k) ? k : DefaultArm(b);
-            return f;
-        }
-
-        private const string NoBranchTaken = "(no branch taken)";
+        private Func<ComboBranch, int> Arms(int level) => _sel.ArmsAt(level);
 
         /// <summary>
         /// A branch decided by game state (distance, HP, SpEffect…) with no <c>else</c> defaults to "(no branch taken)":
         /// nothing happens unless the user says the condition holds. Random branches default to their first arm.
         /// </summary>
-        private static int DefaultArm(ComboBranch b)
-        {
-            if (b.Arms.Any(a => a.Probability != null)) return 0;
-            int none = b.Arms.Count - 1;
-            return none >= 0 && b.Arms[none].Condition == NoBranchTaken ? none : 0;
-        }
+        private static int DefaultArm(ComboBranch b) => ComboChoices.DefaultArm(b);
 
         /// <summary>Dropdown order: for state-decided branches "(no branch taken)" comes first.</summary>
         private static IEnumerable<int> ArmOrder(ComboBranch b)
@@ -321,123 +315,58 @@ namespace SoulsAiStudio.App
             for (int k = 0; k < b.Arms.Count; k++) if (k != def || def == 0) yield return k;
         }
 
+        /// <summary>Simulator over this panel's candidates and the loaded TAE (lookups memoized for its lifetime).</summary>
+        private ComboSimulator NewSimulator() =>
+            new(_handlers, Candidates, QueuedFrame, MaxInterruptDepth) { AttacksHit = _attacksHit };
+
         /// <summary>
-        /// Random path, simulated top-down like the game: the goal's branches are rolled when the goal runs (one value per
-        /// random variable, shared by every <c>if</c> that reads it). Then each anim plays in order; at each TAE SpEffect
-        /// that Goal.Interrupt handles (before "ComboAttack Queued"), the interrupt runs right there with ONE fresh roll
-        /// per random variable (e.g. <c>interruptRand</c>) used by its own condition AND the <c>if</c>s inside it. If it
-        /// fires, the anim is cut and the new chain plays the same way; if not, the anim goes on. Every firing rolls anew.
-        /// Game-state checks (timers, SpEffects, HP, distance inside the arm) are a coin flip; arms whose own condition
-        /// tests the distance are never picked (choose them yourself).
+        /// Random path, simulated top-down like the game (<see cref="ComboSimulator"/>): the goal's branches are rolled when
+        /// the goal runs, then each anim's handled SpEffects in time order before "ComboAttack Queued", each interrupt
+        /// rolled right there with fresh rolls shared by its condition and the ifs inside it.
         /// </summary>
         private void RollRandom()
         {
-            _choice.Clear();
-            _interrupt.Clear();
-            _trigger.Clear();
-            RollBranches(_nodes, 0, new Dictionary<string, int>(), Array.Empty<string>());
-            RollInterrupts(_nodes, 0);
+            NewSimulator().Roll(_nodes, _sel, _rng);
             _plan = null;
         }
-
-        private IReadOnlySet<string> RandomVars => _handlers?.RandomVars ?? new HashSet<string>();
-
-        /// <summary>
-        /// Evaluates a condition with the given rolls (a variable is rolled 1–100 on first use, then reused). Unknown
-        /// game-state parts are a coin flip.
-        /// </summary>
-        private bool Passes(string condition, Dictionary<string, int> rolls, IReadOnlySet<string> matched)
-        {
-            bool ok = RandomCondition.Evaluate(condition, RandomVars, matched,
-                v => rolls.TryGetValue(v, out int x) ? x : rolls[v] = _rng.Next(1, 101), out bool unknown);
-            return ok && (!unknown || _rng.Next(2) == 0);
-        }
-
-        /// <summary>Rolls the branches of a chain top-down (only the arms actually taken are entered).</summary>
-        private void RollBranches(IReadOnlyList<ComboNode> nodes, int level, Dictionary<string, int> rolls, IReadOnlyCollection<string> matchedSp)
-        {
-            var matched = matchedSp.Count == 0 ? (IReadOnlySet<string>)new HashSet<string>() : new HashSet<string>(matchedSp);
-            foreach (var n in nodes)
-            {
-                if (n is not ComboBranch b) continue;
-                int pick = b.Arms.Count - 1;
-                for (int k = 0; k < b.Arms.Count; k++)
-                    if (Passes(b.Arms[k].Condition, rolls, matched)) { pick = k; break; }
-                _choice[(b.Line, level)] = pick;
-                RollBranches(b.Arms[pick].Body, level, rolls, matchedSp);
-            }
-        }
-
-        private void RollInterrupts(IReadOnlyList<ComboNode> nodes, int level)
-        {
-            if (level >= MaxInterruptDepth) return;
-            var steps = ComboSequence.Flatten(nodes, Arms(level));
-            var spVars = _handlers?.SpEffectVars ?? new HashSet<string>();
-            for (int i = 0; i < steps.Count; i++)
-            {
-                var s = steps[i];
-                var c = Candidates(s.AnimId);
-                float? queued = i < steps.Count - 1 ? _app.Bridge.GetComboQueuedFrame(_app.TaeAnimId(s.AnimId)) : null;
-                int pick = -1;
-                for (int k = 0; k < c.Count && pick < 0; k++)
-                {
-                    if (queued is float q && c[k].Frame >= q) continue; // the next anim has started: this SpEffect never comes
-                    var h = c[k].Handler;
-                    if (h.OuterDistance) continue; // the arm itself tests the distance: the user decides
-                    // Goal.Interrupt runs now: one fresh roll per random variable for the arm AND the ifs inside it.
-                    var rolls = new Dictionary<string, int>();
-                    if (!Passes(h.Condition, rolls, spVars)) continue;
-                    RollBranches(h.Body, level + 1, rolls, spVars);
-                    // The arm's branches may add nothing (e.g. "no branch taken"): the anim keeps playing.
-                    if (!ComboSequence.ClearsOnPath(h.Body, Arms(level + 1)) && ComboSequence.Flatten(h.Body, Arms(level + 1)).Count == 0) continue;
-                    pick = k;
-                }
-                _interrupt[(s.Line, level)] = pick;
-                if (pick < 0) continue;
-                RollInterrupts(c[pick].Handler.Body, level + 1);
-                if (ComboSequence.ClearsOnPath(c[pick].Handler.Body, Arms(level + 1))) return;
-            }
-        }
-
-        /// <summary>A step on the played path; Cut = frame where a chosen SpEffect interrupt cuts it.</summary>
-        private sealed record PathItem(ComboStep Step, float? Cut, int? SpEffectId = null, float? SpStart = null);
 
         /// <summary>
         /// Flattens the chosen branches; where the user picked a SpEffect interrupt on a step, that anim is cut at the
         /// SpEffect's frame and the handler's sequence follows (replacing the rest when it starts with ClearSubGoal,
         /// queued after it otherwise).
         /// </summary>
-        private List<PathItem> BuildPath(IReadOnlyList<ComboNode> nodes, int depth)
+        private List<ComboPathItem> BuildPath(IReadOnlyList<ComboNode> nodes, int depth) =>
+            ComboSimulator.BuildPath(nodes, _sel, (s, level) => ChosenInterrupt(s, level) is { } c ? (c.Frame, c.Start, c.Handler) : null,
+                MaxInterruptDepth, depth);
+
+        /// <summary>
+        /// SpEffects that can interrupt the anim and that Goal.Interrupt handles: TAE SpEffect events (+ cycle SpEffects) and
+        /// SpEffects of its behavior events (on hit: AtkParam / Bullet; on self: BehaviorParam / Bullet shooter), by frame.
+        /// </summary>
+        private IReadOnlyList<InterruptCandidate> Candidates(int animId)
         {
-            var result = new List<PathItem>();
-            var steps = ComboSequence.Flatten(nodes, Arms(depth));
-            List<PathItem>? appendAfter = null;
-            foreach (var s in steps)
-            {
-                var chosen = ChosenInterrupt(s, depth);
-                if (chosen == null || depth >= MaxInterruptDepth) { result.Add(new PathItem(s, null)); continue; }
-                var (frame, spStart, _, handler) = chosen.Value;
-                var rest = BuildPath(handler.Body, depth + 1);
-                bool clears = ComboSequence.ClearsOnPath(handler.Body, Arms(depth + 1));
-                // The chosen arm neither clears nor adds anims (e.g. random arm "no branch taken"): the anim keeps playing.
-                if (!clears && rest.Count == 0) { result.Add(new PathItem(s, null)); continue; }
-                result.Add(new PathItem(s, frame, handler.SpEffectId, spStart));
-                if (clears) { result.AddRange(rest); return result; }
-                (appendAfter ??= new()).AddRange(rest);
-            }
-            if (appendAfter != null) result.AddRange(appendAfter);
-            return result;
+            if (_handlers == null) return Array.Empty<InterruptCandidate>();
+            var result = new List<InterruptCandidate>();
+            foreach (var e in SpEvents(animId))
+                if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
+                    result.Add(new InterruptCandidate(e.SpEffectId, e.Frame, e.EndFrame, h,
+                        e.ViaSpEffectId != null ? SpEffectSourceKind.Cycle : SpEffectSourceKind.Tae, ViaText(e)));
+            foreach (var b in BehaviorSp(animId))
+                if (_handlers.Handlers.TryGetValue(b.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
+                {
+                    var c = new InterruptCandidate(b.SpEffectId, b.Frame, b.EndFrame, h, b.Kind,
+                        (b.Kind == SpEffectSourceKind.OnHit ? " on hit (" : " (") + LastLink(b.Chain) + ")", Detail: b.Chain);
+                    // An on-hit SpEffect lands on the target: Goal.Interrupt only sees it when observed on TARGET_ENE_0.
+                    if (c.OnHit && !ComboDiagnostics.ObservedOnRightTarget(_handlers, c)) c = c with { Blocked = true };
+                    result.Add(c);
+                }
+            return result.Count < 2 ? result : result.OrderBy(c => c.Frame).ToList(); // stable: TAE first at equal frames
         }
 
-        private IReadOnlyList<(int SpEffectId, float Frame, float EndFrame, SpEffectHandler Handler, string Via)> Candidates(int animId)
+        private static string LastLink(string chain)
         {
-            if (_handlers == null) return Array.Empty<(int, float, float, SpEffectHandler, string)>();
-            var events = SpEvents(animId);
-            var result = new List<(int, float, float, SpEffectHandler, string)>();
-            foreach (var e in events)
-                if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
-                    result.Add((e.SpEffectId, e.Frame, e.EndFrame, h, ViaText(e)));
-            return result;
+            int i = chain.LastIndexOf(" → ", StringComparison.Ordinal);
+            return i < 0 ? chain : chain[(i + 3)..];
         }
 
         /// <summary>" (cycle of TAE SpEffect 205032, every 0.5 s)" for cycle SpEffects, else "".</summary>
@@ -453,19 +382,67 @@ namespace SoulsAiStudio.App
             return events;
         }
 
-        /// <summary>Tooltip text: every SpEffect event in the anim's TAE and whether Goal.Interrupt handles it.</summary>
+        private readonly Dictionary<int, IReadOnlyList<Core.Combo.BehaviorSpEffect>> _behaviorSp = new();
+        private readonly Dictionary<int, float> _queuedFrames = new();
+
+        /// <summary>SpEffects of the anim's behavior events (AtkParam / Bullet / BehaviorParam). Cached once resolvable.</summary>
+        private IReadOnlyList<Core.Combo.BehaviorSpEffect> BehaviorSp(int animId)
+        {
+            if (_behaviorSp.TryGetValue(animId, out var list)) return list;
+            var r = _app.Bridge.GetBehaviorSpEffects(_app.TaeAnimId(animId));
+            if (r == null) return Array.Empty<Core.Combo.BehaviorSpEffect>();
+            _behaviorSp[animId] = r;
+            return r;
+        }
+
+        /// <summary>Start frame of the anim's "ComboAttack Queued" window (only found frames are cached).</summary>
+        private float? QueuedFrame(int animId)
+        {
+            if (_queuedFrames.TryGetValue(animId, out float f)) return f;
+            var q = _app.Bridge.GetComboQueuedFrame(_app.TaeAnimId(animId));
+            if (q is float v) _queuedFrames[animId] = v;
+            return q;
+        }
+
+        /// <summary>Steps (line, level) followed by another anim on the current path: their SpEffects after ComboAttack Queued never fire.</summary>
+        private readonly HashSet<(int Line, int Level)> _hasNext = new();
+
+        private void ComputeHasNext()
+        {
+            _hasNext.Clear();
+            void Walk(IReadOnlyList<ComboNode> nodes, int level)
+            {
+                if (level > MaxInterruptDepth) return;
+                var steps = ComboSequence.Flatten(nodes, Arms(level));
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    if (i < steps.Count - 1) _hasNext.Add((steps[i].Line, level));
+                    if (level < MaxInterruptDepth && ChosenInterrupt(steps[i], level) is { } ci) Walk(ci.Handler.Body, level + 1);
+                }
+            }
+            Walk(_nodes, 0);
+        }
+
+        /// <summary>Timing / observe hints of a candidate on a step (empty = fine).</summary>
+        private List<string> CandidateWarnings(ComboStep s, int level, InterruptCandidate c) =>
+            _handlers == null ? new List<string>()
+                : ComboDiagnostics.Warnings(_handlers, c, QueuedFrame(s.AnimId), _hasNext.Contains((s.Line, level)));
+
+        /// <summary>Tooltip text: every SpEffect event in the anim's TAE (and its behavior SpEffects) and whether Goal.Interrupt handles it.</summary>
         private string SpEffectSummary(int animId)
         {
+            string How(int id) => _handlers != null && _handlers.Handlers.TryGetValue(id, out var h)
+                ? (h.Replans ? "Interrupt: Replanning()" : $"Interrupt line {h.Line + 1}")
+                : "no handler in Goal.Interrupt";
             var events = SpEvents(animId);
-            if (events.Count == 0) return "TAE SpEffect events: none (or character not loaded)";
-            var lines = events.Select(e =>
-            {
-                string how = _handlers != null && _handlers.Handlers.TryGetValue(e.SpEffectId, out var h)
-                    ? (h.Replans ? "Interrupt: Replanning()" : $"Interrupt line {h.Line + 1}")
-                    : "no handler in Goal.Interrupt";
-                return $"  {_app.SpEffectText(e.SpEffectId)} @ frames {e.Frame:0}–{e.EndFrame:0}{ViaText(e)}  ({how})";
-            });
-            return "TAE SpEffect events:\n" + string.Join("\n", lines);
+            string text = events.Count == 0 ? "TAE SpEffect events: none (or character not loaded)"
+                : "TAE SpEffect events:\n" + string.Join("\n", events.Select(e =>
+                    $"  {_app.SpEffectText(e.SpEffectId)} @ frames {e.Frame:0}–{e.EndFrame:0}{ViaText(e)}  ({How(e.SpEffectId)})"));
+            var beh = BehaviorSp(animId);
+            if (beh.Count > 0)
+                text += "\nAttack / bullet SpEffects (params):\n" + string.Join("\n", beh.Select(b =>
+                    $"  {_app.SpEffectText(b.SpEffectId)} {(b.Kind == SpEffectSourceKind.OnHit ? "on hit" : "on self")} @ frames {b.Frame:0}–{b.EndFrame:0} via {LastLink(b.Chain)}  ({How(b.SpEffectId)})"));
+            return text;
         }
 
         /// <summary>Chosen interrupt of a step: trigger frame (default = SpEffect start), the SpEffect window and its handler.</summary>
@@ -503,18 +480,36 @@ namespace SoulsAiStudio.App
             (h.Chance is double ch ? $" [{ch:0}%]" : "") +
             (h.OuterDistance ? " [distance]" : h.HasStateCondition ? " [conditional]" : h.DependsOnDistance ? " [distance inside]" : h.Chance == null ? " [always]" : "");
 
+        private static string KindTag(InterruptCandidate c) => c.Kind switch
+        {
+            SpEffectSourceKind.Cycle => " (cycle)",
+            SpEffectSourceKind.OnHit => " (on hit)",
+            SpEffectSourceKind.Behavior => " (behavior)",
+            _ => "",
+        };
+
         private void DrawInterruptChoice(ComboStep s, int depth)
         {
             var c = Candidates(s.AnimId);
             if (c.Count == 0) return;
             int k = _interrupt.TryGetValue((s.Line, depth), out int v) ? v : -1;
+            var warnings = c.Select(x => CandidateWarnings(s, depth, x)).ToList();
+            bool chosenWarn = k >= 0 && k < c.Count && warnings[k].Count > 0;
+            bool anyWarn = warnings.Any(w => w.Count > 0);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
             string label = k >= 0 && k < c.Count
-                ? $"SpEffect {_app.SpEffectText(c[k].SpEffectId)}{(c[k].Via.Length > 0 ? " (cycle)" : "")} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + ChanceTag(c[k].Handler)
-                : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available)";
-            if (!ImGui.BeginCombo($"##sp{s.Line}_{depth}", label))
+                ? $"{(chosenWarn ? "(!) " : "")}SpEffect {_app.SpEffectText(c[k].SpEffectId)}{KindTag(c[k])} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + ChanceTag(c[k].Handler)
+                : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available){(anyWarn ? " (!)" : "")}";
+            if (chosenWarn) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
+            bool open = ImGui.BeginCombo($"##sp{s.Line}_{depth}", label);
+            if (chosenWarn) ImGui.PopStyleColor();
+            if (!open)
             {
+                if (anyWarn && ImGui.IsItemHovered())
+                    ImGui.SetTooltip(Esc(string.Join("\n", c.Select((x, i) => (x, w: warnings[i])).Where(t => t.w.Count > 0)
+                        .Select(t => $"SpEffect {_app.SpEffectText(t.x.SpEffectId)}{KindTag(t.x)}:\n  " + string.Join("\n  ", t.w)))
+                        + "\n\nHints, not errors: the analysis only knows the loaded TAE, params and this script."));
                 if (k >= 0 && k < c.Count) _app.SpEffectLabelContextMenu($"##sp_ctx{s.Line}_{depth}", c[k].SpEffectId);
                 return;
             }
@@ -524,21 +519,32 @@ namespace SoulsAiStudio.App
                 for (int i = 0; i < c.Count; i++)
                 {
                     var h = c[i].Handler;
-                    string text = $"SpEffect {_app.SpEffectText(c[i].SpEffectId)}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
+                    string text = $"{(warnings[i].Count > 0 ? "(!) " : "")}SpEffect {_app.SpEffectText(c[i].SpEffectId)}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
                         + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + ChanceTag(h);
-                    if (ImGui.Selectable(text + $"##c{i}", i == k)) { _interrupt[(s.Line, depth)] = i; _trigger.Remove((s.Line, depth)); _plan = null; }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("if " + h.Condition + (ChanceTag(h) == " [always]"
+                    if (warnings[i].Count > 0) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
+                    bool picked = ImGui.Selectable(text + $"##c{i}", i == k);
+                    if (warnings[i].Count > 0) ImGui.PopStyleColor();
+                    if (picked) { _interrupt[(s.Line, depth)] = i; _trigger.Remove((s.Line, depth)); _plan = null; }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(Esc("if " + h.Condition + (ChanceTag(h) == " [always]"
                         ? "\n[always]: the arm has no random or state check, so in game it fires every time the anim\nreaches this SpEffect (Random path always picks it). Pick \"Continue normally\" to see the rest."
                         : "") + (h.OuterDistance
                         ? "\n[distance]: tests the distance to the target, so Random path never picks it.\nCheck the conditions in the code and choose the trigger frame yourself."
-                        : "") + "\nRight-click: set a label for this SpEffect");
+                        : "") + (c[i].OnHit
+                        ? "\n[on hit]: applied to the target when this attack hits (frames = hitbox window). Random path and\nStatistics only pick it with \"Attacks hit\" on." + (c[i].Blocked ? " Not observed on TARGET_ENE_0: never picked." : "")
+                        : c[i].Kind == SpEffectSourceKind.Behavior ? "\n[behavior]: applied to the character itself when this behavior / bullet event runs." : "")
+                        + (c[i].Detail.Length > 0 ? "\nSource: " + c[i].Detail : "")
+                        + (warnings[i].Count > 0 ? "\n\n(!) " + string.Join("\n(!) ", warnings[i]) + "\n(hints, not errors)" : "")
+                        + "\nRight-click: set a label for this SpEffect"));
                     _app.SpEffectLabelContextMenu($"##c_ctx{i}", c[i].SpEffectId);
                 }
             }
             finally { ImGui.EndCombo(); }
         }
 
-        private void Play(List<PathItem> path)
+        /// <summary>Escapes '%' for ImGui format-string APIs (SetTooltip / Text).</summary>
+        private static string Esc(string s) => s.Replace("%", "%%");
+
+        private void Play(IReadOnlyList<ComboPathItem> path)
         {
             _manual.StopLooping();
             _plan = _app.Bridge.PlayCombo(path.Select(p => (_app.TaeAnimId(p.Step.AnimId), p.Cut)).ToList());
