@@ -38,6 +38,7 @@ namespace SoulsAiStudio.App
         private readonly SpEffectLabelsWindow _spLabels;
         private readonly UpdateService _updates;
         private readonly AnimSlotsWindow _animSlots;
+        private readonly FindInScriptsPanel _findScripts;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -54,6 +55,7 @@ namespace SoulsAiStudio.App
             _spLabels = new SpEffectLabelsWindow(this);
             _updates = new UpdateService(this);
             _animSlots = new AnimSlotsWindow(this);
+            _findScripts = new FindInScriptsPanel(this);
             Bridge.FormatSpEffect = SpEffectText;
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             DSAnimStudio.zzz_NotificationManagerIns.HideNotificationPopups = Settings.HideNotificationPopups;
@@ -197,6 +199,7 @@ namespace SoulsAiStudio.App
                 focused |= _combo.Build();
                 focused |= _luabnd.Build();
             }
+            focused |= _findScripts.Build(); // also cancels its search when the project closes
             focused |= _finder.Build(); // works with any loaded character, project or not
             focused |= _spLabels.Build();
             focused |= _animSlots.Build();
@@ -241,6 +244,7 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem($"Save All Scripts ({_editor.DirtyCount})", "", false, _editor.DirtyCount > 0)) _editor.SaveAll();
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
+            if (ImGui.MenuItem("Find in Scripts...", "Ctrl+Shift+F", false, Session != null)) OpenFindInScripts();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
             if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
@@ -358,6 +362,10 @@ namespace SoulsAiStudio.App
         // ---------- characters (model + animations in DSAS) ----------
 
         public IReadOnlyList<OpenScript> OpenScripts => _editor.OpenScripts;
+        public LuaEditorPanel EditorPanel => _editor;
+
+        /// <summary>Opens "Find in Scripts" (Ctrl+Shift+F in the Lua editor); <paramref name="seed"/> prefills the query.</summary>
+        public void OpenFindInScripts(string? seed = null) => _findScripts.Open(seed);
 
         /// <summary>Opens the Swap / Add animation window (Animations panel buttons, Souls AI menu).</summary>
         public void OpenAnimSlots(bool add) => _animSlots.Open(add);

@@ -34,6 +34,7 @@ internal sealed partial class EditorCore
     {
         Buffer.SetText(text);
         Undo.Clear();
+        _extras.Clear();
         _anchor = _cursor = default;
         _preferredColumn = -1;
     }
@@ -42,8 +43,10 @@ internal sealed partial class EditorCore
 
     // ---------------------------------------------------------------- selection
 
+    /// <summary>Places the (single) cursor; secondary carets are dropped.</summary>
     public void SetCursor(Coordinates pos, bool extendSelection = false)
     {
+        _extras.Clear();
         _cursor = Buffer.Sanitize(pos);
         if (!extendSelection)
             _anchor = _cursor;
@@ -51,8 +54,10 @@ internal sealed partial class EditorCore
         ScrollToCursorRequested = true;
     }
 
+    /// <summary>Sets the (single) selection; secondary carets are dropped.</summary>
     public void Select(Coordinates anchor, Coordinates cursor)
     {
+        _extras.Clear();
         _anchor = Buffer.Sanitize(anchor);
         _cursor = Buffer.Sanitize(cursor);
         _preferredColumn = -1;
@@ -107,7 +112,23 @@ internal sealed partial class EditorCore
         ScrollToCursorRequested = true;
     }
 
-    public void MoveLeft(bool select, bool word)
+    public void MoveLeft(bool select, bool word) => ForEachCaret(() => MoveLeftOne(select, word));
+
+    public void MoveRight(bool select, bool word) => ForEachCaret(() => MoveRightOne(select, word));
+
+    public void MoveUp(int lines, bool select) => ForEachCaret(() => MoveVertical(-lines, select));
+
+    public void MoveDown(int lines, bool select) => ForEachCaret(() => MoveVertical(lines, select));
+
+    public void MoveHome(bool select) => ForEachCaret(() => MoveHomeOne(select));
+
+    public void MoveEnd(bool select) => ForEachCaret(() => MoveTo(new Coordinates(_cursor.Line, Buffer.GetLineLength(_cursor.Line)), select));
+
+    public void MoveToStartOfFile(bool select) => ForEachCaret(() => MoveTo(default, select));
+
+    public void MoveToEndOfFile(bool select) => ForEachCaret(() => MoveTo(Buffer.EndOfText, select));
+
+    void MoveLeftOne(bool select, bool word)
     {
         if (!select && HasSelection && !word)
         {
@@ -117,7 +138,7 @@ internal sealed partial class EditorCore
         MoveTo(word ? PrevWordBoundary(_cursor) : PrevChar(_cursor), select);
     }
 
-    public void MoveRight(bool select, bool word)
+    void MoveRightOne(bool select, bool word)
     {
         if (!select && HasSelection && !word)
         {
@@ -126,10 +147,6 @@ internal sealed partial class EditorCore
         }
         MoveTo(word ? NextWordBoundary(_cursor) : NextChar(_cursor), select);
     }
-
-    public void MoveUp(int lines, bool select) => MoveVertical(-lines, select);
-
-    public void MoveDown(int lines, bool select) => MoveVertical(lines, select);
 
     void MoveVertical(int delta, bool select)
     {
@@ -147,7 +164,7 @@ internal sealed partial class EditorCore
     }
 
     /// <summary>Smart home: first non-blank char, or column 0 if already there.</summary>
-    public void MoveHome(bool select)
+    void MoveHomeOne(bool select)
     {
         var line = Buffer.GetLineSpan(_cursor.Line);
         int indent = 0;
@@ -156,12 +173,6 @@ internal sealed partial class EditorCore
         int col = _cursor.Column == indent ? 0 : indent;
         MoveTo(new Coordinates(_cursor.Line, col), select);
     }
-
-    public void MoveEnd(bool select) => MoveTo(new Coordinates(_cursor.Line, Buffer.GetLineLength(_cursor.Line)), select);
-
-    public void MoveToStartOfFile(bool select) => MoveTo(default, select);
-
-    public void MoveToEndOfFile(bool select) => MoveTo(Buffer.EndOfText, select);
 
     Coordinates PrevChar(Coordinates p)
     {
@@ -245,8 +256,10 @@ internal sealed partial class EditorCore
             Removed = a == b ? "" : Buffer.GetText(a, b),
             Added = text,
             Before = new SelectionState(_anchor, _cursor),
+            BeforeExtras = ExtrasSnapshot(),
             IsTyping = isTyping,
         };
+        _extras.Clear(); // single-range edits keep only the primary selection
 
         Buffer.Delete(a, b);
         rec.AddedEnd = Buffer.Insert(a, text);
@@ -305,6 +318,8 @@ internal sealed partial class EditorCore
             return false;
         if (c == '\r')
             c = '\n';
+        if (HasExtras)
+            return MultiTypeChar(c);
         if (c == '\n')
         {
             var line = Buffer.GetLineSpan(SelectionStart.Line);
@@ -322,6 +337,8 @@ internal sealed partial class EditorCore
     {
         if (ReadOnly)
             return false;
+        if (HasExtras)
+            return MultiBackspace(word);
         if (HasSelection)
             return ReplaceSelection("");
         var from = word ? PrevWordBoundary(_cursor) : PrevChar(_cursor);
@@ -332,6 +349,8 @@ internal sealed partial class EditorCore
     {
         if (ReadOnly)
             return false;
+        if (HasExtras)
+            return MultiDelete(word);
         if (HasSelection)
             return ReplaceSelection("");
         var to = word ? NextWordBoundary(_cursor) : NextChar(_cursor);
@@ -346,6 +365,8 @@ internal sealed partial class EditorCore
         bool multiLine = HasSelection && SelectionStart.Line != SelectionEnd.Line;
         if (shift || multiLine)
             return IndentLines(!shift);
+        if (HasExtras)
+            return MultiTab();
 
         int spaces = TabSize - _cursor.Column % TabSize;
         return ReplaceSelection(new string(' ', spaces));
@@ -410,6 +431,11 @@ internal sealed partial class EditorCore
 
     public void Copy()
     {
+        if (HasExtras)
+        {
+            Clipboard.SetText(ToClipboard(MultiCopyText()));
+            return;
+        }
         if (HasSelection)
             Clipboard.SetText(ToClipboard(GetSelectedText()));
         else
@@ -423,6 +449,8 @@ internal sealed partial class EditorCore
             Copy();
             return false;
         }
+        if (HasExtras)
+            return MultiCut();
         if (!HasSelection)
         {
             // VSCode-like: cut the whole line.
@@ -445,7 +473,8 @@ internal sealed partial class EditorCore
         var text = Clipboard.GetText();
         if (string.IsNullOrEmpty(text))
             return false;
-        return ReplaceSelection(text.Replace("\r\n", "\n").Replace('\r', '\n'));
+        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        return HasExtras ? MultiPaste(text) : ReplaceSelection(text);
     }
 
     static string ToClipboard(string text) => Environment.NewLine == "\n" ? text : text.Replace("\n", Environment.NewLine);
@@ -460,6 +489,7 @@ internal sealed partial class EditorCore
         rec.Undo(Buffer);
         _anchor = Buffer.Sanitize(rec.Before.Anchor);
         _cursor = Buffer.Sanitize(rec.Before.Cursor);
+        RestoreExtras(rec.BeforeExtras);
         _preferredColumn = -1;
         ScrollToCursorRequested = true;
         return true;
@@ -475,6 +505,7 @@ internal sealed partial class EditorCore
         rec.Redo(Buffer);
         _anchor = Buffer.Sanitize(rec.After.Anchor);
         _cursor = Buffer.Sanitize(rec.After.Cursor);
+        RestoreExtras(rec.AfterExtras);
         _preferredColumn = -1;
         ScrollToCursorRequested = true;
         return true;

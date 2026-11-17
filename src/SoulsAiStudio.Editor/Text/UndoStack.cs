@@ -25,17 +25,39 @@ internal sealed class UndoRecord
     public SelectionState Before;
     public SelectionState After;
 
+    /// <summary>Secondary carets/selections before / after the edit (null = none). See EditorCore.MultiCursor.</summary>
+    public SelectionState[]? BeforeExtras;
+    public SelectionState[]? AfterExtras;
+
+    /// <summary>
+    /// Multi-caret edit: sub-edits in the order they were applied (bottom of the text first). When set, the record's own
+    /// range fields are unused; undo applies the parts' undo in reverse order.
+    /// </summary>
+    public UndoRecord[]? Parts;
+
     /// <summary>Single-char typing run that may absorb the next typed char.</summary>
     public bool IsTyping;
 
     public void Undo(TextBuffer buffer)
     {
+        if (Parts != null)
+        {
+            for (int i = Parts.Length - 1; i >= 0; i--)
+                Parts[i].Undo(buffer);
+            return;
+        }
         buffer.Delete(Start, AddedEnd);
         buffer.Insert(Start, Removed);
     }
 
     public void Redo(TextBuffer buffer)
     {
+        if (Parts != null)
+        {
+            foreach (var p in Parts)
+                p.Redo(buffer);
+            return;
+        }
         buffer.Delete(Start, RemovedEnd);
         buffer.Insert(Start, Added);
     }
@@ -82,7 +104,7 @@ internal sealed class UndoStack
 
     static bool TryMerge(UndoRecord prev, UndoRecord cur)
     {
-        if (!prev.IsTyping || prev.Removed.Length != 0 || cur.Removed.Length != 0)
+        if (!prev.IsTyping || prev.Parts != null || cur.Parts != null || prev.AfterExtras != null || cur.BeforeExtras != null || prev.Removed.Length != 0 || cur.Removed.Length != 0)
             return false;
         if (prev.AddedEnd != cur.Start || prev.Added.Length == 0 || cur.Added.Length != 1)
             return false;

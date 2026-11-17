@@ -241,7 +241,9 @@ namespace SoulsAiStudio.App
             BuildStatusLine(o);
             o.Editor.SetHighlightLine(o.GoalAtCursor?.Line);
             if (DebugEditor) ImGui.TextColored(Theme.Warn, o.Editor.DebugState.Replace('\n', ' '));
-            return o.Editor.Render("##sas_code", new Vector2(-1, -1));
+            bool focused = o.Editor.Render("##sas_code", new Vector2(-1, -1));
+            if (o.Editor.TryTakeFindInFilesRequest(out string seed)) _app.OpenFindInScripts(seed); // Ctrl+Shift+F
+            return focused;
         }
 
         private void BuildBreadcrumb(OpenScript o)
@@ -291,7 +293,10 @@ namespace SoulsAiStudio.App
                                  "Ctrl+Shift+K               delete line(s)\n" +
                                  "Ctrl+Enter / Ctrl+Shift+Enter   new line below / above\n" +
                                  "Ctrl+/                     comment / uncomment (--)\n" +
-                                 "Ctrl+D                     select word, then next occurrence\n" +
+                                 "Ctrl+D                     select word, then ADD next occurrence (multi-cursor)\n" +
+                                 "Ctrl+Shift+L               select all occurrences\n" +
+                                 "Alt+Click / Ctrl+Alt+Up / Down   add a cursor (Esc: back to one)\n" +
+                                 "Ctrl+Shift+F               find / replace in many scripts\n" +
                                  "Ctrl+] / Ctrl+[  Tab / Shift+Tab   indent / outdent\n" +
                                  "Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)   undo / redo\n" +
                                  "Ctrl+F / Ctrl+H / F3 / Shift+F3   find / replace / next / previous\n" +

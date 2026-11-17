@@ -127,7 +127,7 @@ public class LineCommandTests
     }
 
     [Fact]
-    public void CtrlD_SelectsWordThenNextOccurrence()
+    public void CtrlD_SelectsWordThenAddsNextOccurrence()
     {
         var (e, k) = Setup("x = 3001\ny = 3001 + 3001");
         e.Core.SetCursor((0, 5));
@@ -138,8 +138,10 @@ public class LineCommandTests
         Assert.Equal(new Coordinates(1, 4), e.Core.SelectionStart);
         Step(e, k.Frame(ctrl: true, keys: EditorKey.D));
         Assert.Equal(new Coordinates(1, 11), e.Core.SelectionStart);
-        Step(e, k.Frame(ctrl: true, keys: EditorKey.D));
-        Assert.Equal(new Coordinates(0, 4), e.Core.SelectionStart); // wraps
+        Assert.Equal(3, e.Core.CaretCount); // Ctrl+D ADDS selections
+        Assert.False(e.Core.SelectNextOccurrence()); // wraps: every occurrence already selected
+        Assert.Equal(new Coordinates(1, 11), e.Core.SelectionStart);
+        Assert.Equal(3, e.Core.CaretCount);
     }
 
     [Fact]
