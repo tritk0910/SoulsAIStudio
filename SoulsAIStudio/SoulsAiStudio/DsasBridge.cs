@@ -15,7 +15,7 @@ namespace SoulsAiStudio.App
     /// The only place our UI calls into DSAS internals (zzz_*, Main.*) for viewing characters
     /// (CLAUDE.md §6 convention 2). Uses the same entry point as DSAS's URI loader / recent-files menu.
     /// </summary>
-    public sealed class DsasBridge
+    public sealed partial class DsasBridge
     {
         /// <summary>Main anibnd currently open in DSAS, or null.</summary>
         public string? LoadedAnibnd => Safe(() => zzz_DocumentManager.CurrentDocument?.EditorScreen?.NewFileContainerName);

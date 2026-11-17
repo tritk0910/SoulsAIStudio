@@ -57,7 +57,7 @@ namespace SoulsAiStudio.App
     }
 
     /// <summary>Lua editor panel (SoulsAiStudio.Editor widget) with the goal navigator breadcrumb (CLAUDE.md §5b).</summary>
-    public sealed class LuaEditorPanel
+    public sealed partial class LuaEditorPanel
     {
         private static readonly TimeSpan AnalysisDebounce = TimeSpan.FromMilliseconds(250);
         private readonly SasApp _app;
@@ -174,6 +174,7 @@ namespace SoulsAiStudio.App
             _keys.NewFrame();
             VisibleInDockId = 0;
             foreach (var o in _open) PollTasks(o);
+            PollDiskChecks(); // LuaEditorPanel.External.cs
             if (!IsOpen) { ImeGuard.SetEditorFocused(DSAnimStudio.Main.WinForm?.Handle ?? IntPtr.Zero, false, true); return false; }
 
             var vp = ImGui.GetMainViewport();
@@ -237,6 +238,7 @@ namespace SoulsAiStudio.App
             if (o.Error != null) { ImGui.TextColored(Theme.Error, o.Error); return false; }
             if (o.Doc == null) { ImGui.TextDisabled(o.Loading != null ? "Loading (decompiling if needed)..." : "Not loaded."); return false; }
 
+            BuildDiskBanner(o); // changed on disk while edited (LuaEditorPanel.External.cs)
             BuildBreadcrumb(o);
             BuildStatusLine(o);
             o.Editor.SetHighlightLine(o.GoalAtCursor?.Line);
