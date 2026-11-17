@@ -104,6 +104,8 @@ internal sealed class UndoStack
 
     static bool TryMerge(UndoRecord prev, UndoRecord cur)
     {
+        if (prev.Parts != null && cur.Parts != null)
+            return TryMergeMulti(prev, cur);
         if (!prev.IsTyping || prev.Parts != null || cur.Parts != null || prev.AfterExtras != null || cur.BeforeExtras != null || prev.Removed.Length != 0 || cur.Removed.Length != 0)
             return false;
         if (prev.AddedEnd != cur.Start || prev.Added.Length == 0 || cur.Added.Length != 1)
@@ -119,6 +121,49 @@ internal sealed class UndoStack
         prev.Added += cur.Added;
         prev.AddedEnd = cur.AddedEnd;
         prev.After = cur.After;
+        return true;
+    }
+
+    /// <summary>
+    /// Multi-caret typing: merges when the same carets typed one more char each and nothing else happened in between
+    /// (the carets are exactly where the previous step left them). Each part keeps its original start: undo removes the
+    /// parts top-down, so every part's recorded start is valid again when its own text is removed (see UndoRecord.Undo).
+    /// </summary>
+    static bool TryMergeMulti(UndoRecord prev, UndoRecord cur)
+    {
+        if (!prev.IsTyping || !cur.IsTyping || prev.Parts!.Length != cur.Parts!.Length)
+            return false;
+        if (prev.After.Anchor != cur.Before.Anchor || prev.After.Cursor != cur.Before.Cursor || !SameCarets(prev.AfterExtras, cur.BeforeExtras))
+            return false;
+        for (int i = 0; i < prev.Parts.Length; i++)
+        {
+            var a = prev.Parts[i];
+            var b = cur.Parts[i];
+            if (a.Start.Line != b.Start.Line || a.Added.Length >= 256)
+                return false;
+            if (b.Added[0] == ' ' && a.Added[^1] != ' ')
+                return false; // word granularity, as for one caret
+        }
+        for (int i = 0; i < prev.Parts.Length; i++)
+        {
+            var a = prev.Parts[i];
+            a.Added += cur.Parts[i].Added;
+            a.AddedEnd = new Coordinates(a.Start.Line, a.Start.Column + a.Added.Length);
+        }
+        prev.After = cur.After;
+        prev.AfterExtras = cur.AfterExtras;
+        return true;
+    }
+
+    static bool SameCarets(SelectionState[]? x, SelectionState[]? y)
+    {
+        if (x == null || y == null)
+            return x == y;
+        if (x.Length != y.Length)
+            return false;
+        for (int i = 0; i < x.Length; i++)
+            if (x[i].Anchor != y[i].Anchor || x[i].Cursor != y[i].Cursor)
+                return false;
         return true;
     }
 

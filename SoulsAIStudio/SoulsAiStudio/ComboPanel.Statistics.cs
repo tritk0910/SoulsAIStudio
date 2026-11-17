@@ -31,12 +31,17 @@ namespace SoulsAiStudio.App
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Runs \"Random path\" many times (nothing is played, your choices are kept) and shows the most\n" +
                                  "frequent paths, how often each anim is reached and how often each SpEffect interrupt fires.");
-            ImGui.SameLine();
+            SameLineIfFits(70);
             ImGui.SetNextItemWidth(70);
             ImGui.InputInt("##sas_combo_runs", ref _statsRuns, 0, 0);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Number of simulated runs");
-            ImGui.SameLine();
-            ImGui.Checkbox("Attacks hit", ref _attacksHit);
+            SameLineIfFits(ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize("Attacks hit").X);
+            // Results on screen follow the switch: re-run with the same number of runs (fast, nothing is played).
+            if (ImGui.Checkbox("Attacks hit", ref _attacksHit) && _stats != null && _nodes.Count > 0)
+            {
+                _stats = NewSimulator().Run(_nodes, _stats.Runs, new Random(), topPaths: 10);
+                _statsAttacksHit = _attacksHit;
+            }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("On: the anims' attacks / bullets hit the target, so SpEffects applied on hit (AtkParam / Bullet\n" +
                                  "spEffectId0..4) can fire Goal.Interrupt in Random path and Statistics. Off: they never fire.\n" +

@@ -52,11 +52,31 @@ namespace SoulsAiStudio.App
                 doc.GameRoot.SuppressNextInterrootBrowsePrompt = true;
             if (doc.EditorScreen != null) doc.EditorScreen.SuppressNextModelOverridePrompt = true;
 
+            // DSAS always opens a file in a NEW document tab. Reloading the anibnd that is already open here would leave the old
+            // tab behind (two "[SDT]c5400" tabs), so close the old document once the new one is open. With unsaved TAE
+            // changes it goes through DSAS's normal close (which asks), unless the user already chose to discard them.
+            var old = doc.EditorScreen?.IsFileOpen == true && doc.EditorScreen.NewFileContainerName is { } openName
+                      && string.Equals(Path.GetFullPath(openName), Path.GetFullPath(files.AnibndPath), StringComparison.OrdinalIgnoreCase)
+                ? doc : null;
+            bool discard = DiscardChangesOnNextReload;
+            DiscardChangesOnNextReload = false;
+
             var container = new DSAProj.TaeContainerInfo.ContainerAnibnd(files.AnibndPath, files.ChrbndPath ?? "");
             zzz_DocumentManager.RequestFileOpenRecent = true;
             zzz_DocumentManager.RequestFileOpenRecent_SelectedFile = container;
-            zzz_DocumentManager.RequestFileOpenRecent_AfterOpenAction += _ => onLoaded?.Invoke(files.ChrId);
+            zzz_DocumentManager.RequestFileOpenRecent_AfterOpenAction += newDoc =>
+            {
+                if (old != null && newDoc != old && !old.IsDisposed)
+                {
+                    if (!discard && old.EditorScreen?.IsModified == true) old.RequestClose = true;
+                    else old.RequestClose_ForceDelete = true;
+                }
+                onLoaded?.Invoke(files.ChrId);
+            };
         }
+
+        /// <summary>Set before a reload the user confirmed: the old document's unsaved TAE changes are dropped without asking again.</summary>
+        public bool DiscardChangesOnNextReload { get; set; }
 
         private static readonly System.Reflection.FieldInfo? DocumentsField =
             typeof(zzz_DocumentManager).GetField("Documents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
@@ -296,14 +316,20 @@ namespace SoulsAiStudio.App
                 {
                     var w = FirstWindow(taeAnim, snap, a => Array.IndexOf(SpEffectEventTypes, a.Type) >= 0, sp)
                             ?? CycleWindow(req.AnimId, sp); // [cycle] SpEffect applied by a TAE SpEffect's SpEffectParam
-                    if (w is not { } win) { reason = $"SpEffect {Sp(sp)} not in TAE → anim end"; warn = true; }
+                    string via = "";
+                    if (w == null && BehaviorWindow(req.AnimId, sp) is { } bw) // on hit / behavior: AtkParam / Bullet SpEffect
+                    {
+                        w = (bw.Start, bw.End);
+                        via = bw.Kind == SoulsAiStudio.Core.Lua.Analysis.SpEffectSourceKind.OnHit ? " on hit" : " (behavior)";
+                    }
+                    if (w is not { } win) { reason = $"SpEffect {Sp(sp)} not in TAE or its attacks → anim end"; warn = true; }
                     else if (req.Cut.AtFrame is float at)
                     {
                         end = Math.Clamp(at, win.Start, win.End);
-                        reason = $"SpEffect {Sp(sp)} @ f{end:0} (active f{win.Start:0}–{win.End:0})";
+                        reason = $"SpEffect {Sp(sp)}{via} @ f{end:0} (active f{win.Start:0}–{win.End:0})";
                         if (at < win.Start || at > win.End) { reason += $": f{at:0} is outside, clamped"; warn = true; }
                     }
-                    else { end = win.Start; reason = $"SpEffect {Sp(sp)}"; }
+                    else { end = win.Start; reason = $"SpEffect {Sp(sp)}{via}"; }
                 }
                 else if (req.Cut.JumpTableFlag >= 0)
                 {
@@ -339,6 +365,16 @@ namespace SoulsAiStudio.App
         {
             foreach (var e in GetSpEffectEventsDetailed(animId))
                 if (e.SpEffectId == spEffectId && e.ViaSpEffectId != null) return (e.Frame, e.EndFrame);
+            return null;
+        }
+
+        /// <summary>Hitbox window of the earliest attack/bullet/behavior event of the anim that applies this SpEffect.</summary>
+        private (float Start, float End, SoulsAiStudio.Core.Lua.Analysis.SpEffectSourceKind Kind)? BehaviorWindow(int animId, int spEffectId)
+        {
+            var list = GetBehaviorSpEffects(animId);
+            if (list == null) return null;
+            foreach (var b in list.OrderBy(b => b.Frame))
+                if (b.SpEffectId == spEffectId) return (b.Frame, Math.Max(b.Frame, b.EndFrame), b.Kind);
             return null;
         }
 

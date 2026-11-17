@@ -246,7 +246,7 @@ namespace SoulsAiStudio.App
             if (_start != null) DrawStartNotes(_start);
 
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
-            ImGui.SameLine();
+            SameLineIfFits(ButtonWidth("Random path"));
             if (ImGui.Button("Random path")) { RollRandom(); Play(BuildPath(_nodes, 0)); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Plays the combo top-down like the game: the goal's random branches, then each anim's TAE SpEffects in\n" +
                 "time order (before ComboAttack Queued). At each one Goal.Interrupt is rolled right there, with one\n" +
@@ -254,14 +254,14 @@ namespace SoulsAiStudio.App
                 "Timers / SpEffect / HP checks and distance tests inside an arm count as 50/50.\n" +
                 "Arms whose own condition tests the distance are never picked: choose them yourself.\n" +
                 "On-hit SpEffects (AtkParam / Bullet) only count with \"Attacks hit\" on.");
-            ImGui.SameLine();
+            SameLineIfFits(ButtonWidth("Statistics"));
             DrawStatisticsButton();
-            ImGui.SameLine();
+            SameLineIfFits(ButtonWidth("▶ Resume"));
             if (ImGui.Button(_app.Bridge.ComboPaused ? "▶ Resume" : "|| Pause")) _app.Bridge.ToggleComboPause();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Space also pauses/resumes the combo");
-            ImGui.SameLine();
+            SameLineIfFits(ButtonWidth("■ Stop"));
             if (ImGui.Button("■ Stop")) { _app.Bridge.StopCombo(); }
-            ImGui.SameLine();
+            SameLineIfFits(ButtonWidth("→ Manual"));
             if (ImGui.Button("→ Manual") && path.Count > 0)
             {
                 string from = _start != null ? $"Goal.Interrupt SpEffect {_app.SpEffectText(_start.SpEffectId)} (line {_start.Line + 1})" : $"Goal.{_goal!.Name} (line {_goal.Line + 1})";
@@ -270,8 +270,10 @@ namespace SoulsAiStudio.App
                 _selectManual = true;
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy this path (with its SpEffect interrupts) into the Manual tab as a combo script to edit");
+            ImGui.PushTextWrapPos(0);
             ImGui.TextDisabled(path.Count == 0 ? "no anims in this path"
                 : string.Join(" → ", path.Select(p => p.Cut != null ? p.Step.AnimId + " (SpEffect cut)" : p.Step.AnimId.ToString())));
+            ImGui.PopTextWrapPos();
 
             DrawStatistics();
             ComputeHasNext();
@@ -463,7 +465,7 @@ namespace SoulsAiStudio.App
             int lo = (int)Math.Round(ci.Start), hi = (int)Math.Round(ci.End), at = (int)Math.Round(ci.Frame);
             ImGui.TextDisabled("Triggers at");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(Math.Max(120, ImGui.GetContentRegionAvail().X - 130));
+            ImGui.SetNextItemWidth(Math.Max(60, ImGui.GetContentRegionAvail().X - ButtonWidth("start") - ButtonWidth("end") - 3 * ImGui.GetStyle().ItemSpacing.X));
             if (ImGui.SliderInt($"##trig{s.Line}_{level}", ref at, lo, hi, "frame %d")) { _trigger[(s.Line, level)] = at; _plan = null; }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip($"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} is active from frame {lo} to {hi} ({lo / 30f:0.00}–{hi / 30f:0.00} s).\n" +
@@ -496,10 +498,10 @@ namespace SoulsAiStudio.App
             var warnings = c.Select(x => CandidateWarnings(s, depth, x)).ToList();
             bool chosenWarn = k >= 0 && k < c.Count && warnings[k].Count > 0;
             bool anyWarn = warnings.Any(w => w.Count > 0);
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X));
+            SameLineIfFits(140);
+            ImGui.SetNextItemWidth(-1);
             string label = k >= 0 && k < c.Count
-                ? $"{(chosenWarn ? "(!) " : "")}SpEffect {_app.SpEffectText(c[k].SpEffectId)}{KindTag(c[k])} (f{c[k].Frame:0}–{c[k].EndFrame:0}) -> Interrupt" + ChanceTag(c[k].Handler)
+                ? $"{(chosenWarn ? "(!) " : "")}SpEffect {_app.SpEffectText(c[k].SpEffectId)}{KindTag(c[k])} (f{c[k].Frame:0}–{c[k].EndFrame:0})" + ChanceTag(c[k].Handler)
                 : $"No interrupt ({c.Count} SpEffect interrupt{(c.Count == 1 ? "" : "s")} available){(anyWarn ? " (!)" : "")}";
             if (chosenWarn) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
             bool open = ImGui.BeginCombo($"##sp{s.Line}_{depth}", label);
@@ -541,6 +543,20 @@ namespace SoulsAiStudio.App
             finally { ImGui.EndCombo(); }
         }
 
+        /// <summary>Indent of a tree depth: 12 px per level, at most a third of the panel so deep combos stay readable.</summary>
+        private static float Ind(int depth) => 2 + Math.Min(depth * 12f, Math.Max(24f, ImGui.GetWindowWidth() / 3f));
+
+        /// <summary>Width of a button (or small button) with this label.</summary>
+        private static float ButtonWidth(string label) => ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2;
+
+        /// <summary>SameLine() when an item of <paramref name="width"/> still fits on the current line, else wrap to a new line.</summary>
+        internal static void SameLineIfFits(float width)
+        {
+            float right = ImGui.GetItemRectMax().X + ImGui.GetStyle().ItemSpacing.X + width;
+            float limit = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
+            if (right <= limit) ImGui.SameLine();
+        }
+
         /// <summary>Escapes '%' for ImGui format-string APIs (SetTooltip / Text).</summary>
         private static string Esc(string s) => s.Replace("%", "%%");
 
@@ -566,7 +582,7 @@ namespace SoulsAiStudio.App
                     switch (n)
                     {
                         case ComboStep s when cutBy is int by:
-                            ImGui.Indent(depth * 14 + 2);
+                            ImGui.Indent(Ind(depth));
                             if (ImGui.Selectable($"##step{s.Line}", false, ImGuiSelectableFlags.None, new Vector2(0, 0)))
                             {
                                 _editor.JumpTo(s.Line);
@@ -574,17 +590,21 @@ namespace SoulsAiStudio.App
                                 _app.PlayLuaAnim(s.AnimId);
                             }
                             ImGui.SameLine(0, 0);
-                            ImGui.TextDisabled($"{s.AnimId}   {ShortGoal(s.GoalType)}   not reached (queue cleared by the SpEffect cut on {by})");
+                            ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+                            ImGui.PushTextWrapPos(0);
+                            ImGui.TextUnformatted($"{s.AnimId}   {ShortGoal(s.GoalType)}   not reached (queue cleared by the SpEffect cut on {by})");
+                            ImGui.PopTextWrapPos();
+                            ImGui.PopStyleColor();
                             if (ImGui.IsItemHovered())
                                 ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nThe SpEffect interrupt on anim {by} runs ClearSubGoal(), so this anim is removed from\n" +
                                                  $"the AI queue and never plays on this path (its own SpEffect interrupts are not rolled).\n" +
                                                  $"Set {by} to \"Continue normally\" to play the rest of the combo.\n\nClick: jump to code + play this anim");
-                            ImGui.Unindent(depth * 14 + 2);
+                            ImGui.Unindent(Ind(depth));
                             break;
                         case ComboStep s:
-                            ImGui.Indent(depth * 14 + 2);
+                            ImGui.Indent(Ind(depth));
                             if (ImGui.Selectable($"{s.AnimId}   {ShortGoal(s.GoalType)}##step{s.Line}", false, ImGuiSelectableFlags.None,
-                                    new Vector2(Candidates(s.AnimId).Count > 0 ? 210 : 0, 0)))
+                                    new Vector2(Candidates(s.AnimId).Count > 0 ? Math.Min(210, Math.Max(120, ImGui.GetContentRegionAvail().X * 0.4f)) : 0, 0)))
                             {
                                 _editor.JumpTo(s.Line);
                                 if (_editor.Active is { } ed) _ownJump = ed.Editor.Cursor;
@@ -593,14 +613,18 @@ namespace SoulsAiStudio.App
                             if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Line {s.Line + 1}: {s.GoalType}\nClick: jump to code + play this anim\nRight-click: label its SpEffects\n\n" + SpEffectSummary(s.AnimId));
                             StepContextMenu(s);
                             DrawInterruptChoice(s, level);
-                            ImGui.Unindent(depth * 14 + 2);
+                            ImGui.Unindent(Ind(depth));
                             if (ChosenInterrupt(s, level) is { } ci && level < MaxInterruptDepth)
                             {
-                                ImGui.Indent((depth + 1) * 14 + 2);
-                                ImGui.TextColored(Theme.Warn, $"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, Arms(level + 1)) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
+                                ImGui.Indent(Ind(depth + 1));
+                                ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
+                                ImGui.PushTextWrapPos(0);
+                                ImGui.TextUnformatted($"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, Arms(level + 1)) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
+                                ImGui.PopTextWrapPos();
+                                ImGui.PopStyleColor();
                                 _app.SpEffectLabelContextMenu($"##ci_ctx{s.Line}_{level}", ci.Handler.SpEffectId);
                                 DrawTriggerFrame(s, level, ci);
-                                ImGui.Unindent((depth + 1) * 14 + 2);
+                                ImGui.Unindent(Ind(depth + 1));
                                 int? innerCut = null;
                                 DrawNodes(ci.Handler.Body, depth + 1, level + 1, ref innerCut);
                                 // Same rule as BuildPath: an arm that neither clears nor adds anims lets the anim keep playing.
@@ -608,12 +632,12 @@ namespace SoulsAiStudio.App
                             }
                             break;
                         case ComboClear:
-                            ImGui.Indent(depth * 14 + 2);
+                            ImGui.Indent(Ind(depth));
                             ImGui.TextDisabled("ClearSubGoal()");
-                            ImGui.Unindent(depth * 14 + 2);
+                            ImGui.Unindent(Ind(depth));
                             break;
                         case ComboBranch b:
-                            ImGui.Indent(depth * 14 + 2);
+                            ImGui.Indent(Ind(depth));
                             int chosen = Arms(level)(b);
                             ImGui.SetNextItemWidth(-1);
                             if (ImGui.BeginCombo($"##br{b.Line}", ArmLabel(b.Arms[chosen])))
@@ -625,7 +649,7 @@ namespace SoulsAiStudio.App
                                 }
                                 finally { ImGui.EndCombo(); }
                             }
-                            ImGui.Unindent(depth * 14 + 2);
+                            ImGui.Unindent(Ind(depth));
                             DrawNodes(b.Arms[chosen].Body, depth + 1, level, ref cutBy);
                             break;
                     }

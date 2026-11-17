@@ -242,7 +242,7 @@ internal sealed partial class EditorCore
     /// Applies one edit per caret as ONE undo step (sub-edits applied bottom-up so earlier coordinates stay valid).
     /// Each caret ends up collapsed at the end of its inserted text. Returns false if nothing changed.
     /// </summary>
-    bool MultiEdit(CaretEdit edit)
+    bool MultiEdit(CaretEdit edit, bool typing = false)
     {
         if (ReadOnly)
             return false;
@@ -336,6 +336,8 @@ internal sealed partial class EditorCore
             BeforeExtras = beforeExtras,
             After = new SelectionState(_anchor, _cursor),
             AfterExtras = ExtrasSnapshot(),
+            // plain chars typed at every caret merge into one undo step like single-caret typing (UndoStack.TryMerge)
+            IsTyping = typing && parts.TrueForAll(x => x.Removed.Length == 0 && x.Added.Length == 1 && x.Added[0] != '\n'),
         });
         ScrollToCursorRequested = true;
         return true;
@@ -356,7 +358,7 @@ internal sealed partial class EditorCore
             indent++;
         t = indent == 0 ? "\n" : "\n" + new string(line[..indent]);
         return true;
-    });
+    }, typing: c != '\n');
 
     bool MultiBackspace(bool word) => MultiEdit((int _, Caret k, out Coordinates a, out Coordinates b, out string t) =>
     {

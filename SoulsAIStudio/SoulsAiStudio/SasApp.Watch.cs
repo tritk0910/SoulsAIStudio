@@ -178,7 +178,7 @@ namespace SoulsAiStudio.App
             if (d.ConfirmDiscard)
             {
                 ImGui.TextColored(Theme.Error, "The animations have unsaved changes here. Reload the file from disk without them?");
-                if (ImGui.Button("Reload, discard my TAE changes")) { ReloadCharacterFromDisk(d.Tag); return true; }
+                if (ImGui.Button("Reload, discard my TAE changes")) { Bridge.DiscardChangesOnNextReload = true; ReloadCharacterFromDisk(d.Tag); return true; }
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel")) d.ConfirmDiscard = false;
                 return false;

@@ -254,7 +254,39 @@ namespace SoulsAiStudio.App
                           + (endFrame - frame >= 2 ? $"\n\nActive f{frame:0}–{endFrame:0}: click inserts SpEffect {sp} (cut at f{frame:0});\nwrite SpEffect {sp}@<frame> to cut later in that window." : "")) + "\nRight-click: set a label for this SpEffect");
                 if (click) ApplyCut($"{ComboScript.SpEffectKeyword} {sp}");
             }
+            // SpEffects applied by the anim's attacks (on hit) or behaviors: AtkParam / Bullet, not in the TAE itself.
+            foreach (var b in BehaviorSpEffectsOf(step.AnimId))
+            {
+                if (sps.Any(x => x.SpEffectId == b.SpEffectId)) continue;
+                var h = _handlerFor(b.SpEffectId);
+                bool onHit = b.Kind == SoulsAiStudio.Core.Lua.Analysis.SpEffectSourceKind.OnHit;
+                string label = $"SpEffect {_app.SpEffectText(b.SpEffectId)} {(onHit ? "on hit" : "(behavior)")}   f{b.Frame:0}–{b.EndFrame:0}" + (h != null ? "   [Interrupt]" : "");
+                if (h != null) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
+                bool click = ImGui.Selectable(label.Replace("%", "%%") + $"##b{k++}", false);
+                if (h != null) ImGui.PopStyleColor();
+                _app.SpEffectLabelContextMenu($"##b_ctx{k}", b.SpEffectId);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(((onHit ? "Applied to the target when this attack hits" : "Applied when this behavior runs")
+                        + $" (frames {b.Frame:0}–{b.EndFrame:0}):\n{b.Chain}\n"
+                        + (h == null ? "Goal.Interrupt of the open script has no branch for this SpEffect"
+                            : $"Goal.Interrupt line {h.Line + 1}: if {h.Condition}")
+                        + $"\nClick inserts SpEffect {b.SpEffectId}: the anim is cut where the hitbox starts (assumes the attack hits).").Replace("%", "%%"));
+                if (click) ApplyCut($"{ComboScript.SpEffectKeyword} {b.SpEffectId}");
+            }
             if (ImGui.Selectable($"NoCancel   (play to the end)##nc")) ApplyCut("NoCancel");
+        }
+
+        private readonly Dictionary<int, IReadOnlyList<SoulsAiStudio.Core.Combo.BehaviorSpEffect>> _behaviorCache = new();
+        private DateTime _behaviorCacheTime;
+
+        /// <summary>On-hit / behavior SpEffects of an anim, cached for a second (resolving walks the params).</summary>
+        private IReadOnlyList<SoulsAiStudio.Core.Combo.BehaviorSpEffect> BehaviorSpEffectsOf(int animId)
+        {
+            if (DateTime.UtcNow - _behaviorCacheTime > TimeSpan.FromSeconds(1)) { _behaviorCache.Clear(); _behaviorCacheTime = DateTime.UtcNow; }
+            if (_behaviorCache.TryGetValue(animId, out var list)) return list;
+            var found = _app.Bridge.GetBehaviorSpEffects(animId);
+            if (found == null) return Array.Empty<SoulsAiStudio.Core.Combo.BehaviorSpEffect>(); // not loaded yet: don't cache
+            return _behaviorCache[animId] = found;
         }
 
         /// <summary>Replaces the keyword of the line after the selected step, or appends "keyword " as a new line.</summary>

@@ -33,14 +33,16 @@ public class MultiCursorTests
         Step(e, k.Frame("Y"));
         Assert.Equal("aXYbc\naXYbc\naXYbc", e.Text);
 
-        e.Undo();
-        Assert.Equal("aXbc\naXbc\naXbc", e.Text);
-        Assert.Equal("0:2 1:2 2:2", Carets(e)); // carets restored too
+        e.Undo(); // the typed run "XY" is one step, like single-caret typing
+        Assert.Equal("abc\nabc\nabc", e.Text);
+        Assert.Equal("0:1 1:1 2:1", Carets(e)); // carets restored too
+        e.Redo();
+        Assert.Equal("aXYbc\naXYbc\naXYbc", e.Text);
         e.Undo();
         Assert.Equal("abc\nabc\nabc", e.Text);
         Assert.Equal("0:1 1:1 2:1", Carets(e));
         e.Redo();
-        Assert.Equal("aXbc\naXbc\naXbc", e.Text);
+        Assert.Equal("aXYbc\naXYbc\naXYbc", e.Text);
         Assert.Equal(3, e.CaretCount);
     }
 
@@ -271,5 +273,31 @@ public class MultiCursorTests
         e.ReadOnly = true;
         Step(e, k.Frame("X"));
         Assert.Equal("ab\ncd", e.Text);
+    }
+}
+
+public class MultiCursorTypingUndoTests
+{
+    [Fact]
+    public void TypingRun_SameLineCarets_UndoRedoInOneStep_SpaceStartsNewStep()
+    {
+        var e = new LuaCodeEditor { Clipboard = new MemoryClipboard() };
+        e.Text = "f(3060, 3060)";
+        e.Core.SetCursor((0, 6));
+        e.Core.AddCaret((0, 12));
+        var k = new FakeKeys();
+        foreach (var ch in "abc")
+            e.ProcessKeys(k.Frame(ch.ToString()), editorFocused: true, textFocused: true, pageLines: 20);
+        Assert.Equal("f(3060abc, 3060abc)", e.Text);
+        e.ProcessKeys(k.Frame(" x"), editorFocused: true, textFocused: true, pageLines: 20);
+        Assert.Equal("f(3060abc x, 3060abc x)", e.Text);
+        e.Undo();
+        Assert.Equal("f(3060abc, 3060abc)", e.Text);
+        e.Undo();
+        Assert.Equal("f(3060, 3060)", e.Text);
+        e.Redo();
+        Assert.Equal("f(3060abc, 3060abc)", e.Text);
+        e.Redo();
+        Assert.Equal("f(3060abc x, 3060abc x)", e.Text);
     }
 }
