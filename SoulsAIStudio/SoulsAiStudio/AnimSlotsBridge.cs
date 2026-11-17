@@ -69,15 +69,24 @@ namespace SoulsAiStudio.App
 
         // ---------------------------------------------------------------- swap
 
-        /// <summary>Applies a swap plan; <paramref name="keepRefs"/> = referencing entries (ids after the swap) to leave alone.</summary>
-        public static void ApplySwap(AnimSwapPlan plan, IReadOnlySet<int> keepRefs)
+        /// <summary>
+        /// Applies a swap plan; <paramref name="keepRefs"/> = referencing entries (ids after the swap) to leave alone.
+        /// <paramref name="onUndo"/> / <paramref name="onRedo"/> run (next frame, on the UI thread) whenever DSAS undoes /
+        /// redoes this global action, so the Lua part of the swap follows (not on the first do: the caller does that).
+        /// Returns the handle "Undo last swap" uses.
+        /// </summary>
+        public static SwapHandle ApplySwap(AnimSwapPlan plan, IReadOnlySet<int> keepRefs, Action? onUndo = null, Action? onRedo = null)
         {
             var tae = Tae ?? throw new InvalidOperationException("No character loaded.");
             var proj = tae.Proj;
             int selected = tae.SelectedAnim?.SplitID.GetFullID(proj) ?? -1;
+            bool done = false;
+            TaeUndoableAction? action = null;
             tae.GlobalUndoMan.NewAction(
                 doAction: () =>
                 {
+                    if (done && onRedo != null) Main.MainThreadLazyDispatch(onRedo); // redo re-runs this delegate
+
                     // Entries: find all first (ids change while iterating).
                     var moving = AllAnims(proj).Where(a => plan.EntryMoves.Any(m => m.From == a.SplitID.GetFullID(proj))).ToList();
                     foreach (var a in moving)
@@ -108,8 +117,74 @@ namespace SoulsAiStudio.App
                     MoveHkx(tae, plan.HkxMoves);
                     AfterChange(tae, plan.Map(selected));
                 },
-                undoAction: () => MoveHkx(tae, plan.HkxMoves.Select(m => (m.To, m.From)).ToList()), // DSAS then restores the TAE and reselects
-                actionDescription: $"Swap {AnimSlots.IdName(plan.A)} <-> {AnimSlots.IdName(plan.B)}");
+                undoAction: () =>
+                {
+                    MoveHkx(tae, plan.HkxMoves.Select(m => (m.To, m.From)).ToList()); // DSAS then restores the TAE and reselects
+                    if (onUndo != null) Main.MainThreadLazyDispatch(onUndo); // outside DSAS's Invoke + document lock
+                },
+                actionDescription: $"Swap {AnimSlots.IdName(plan.A)} <-> {AnimSlots.IdName(plan.B)}",
+                registAction: a => action = a); // called before the do: gives us the action object (no custom regist)
+            done = true;
+            return new SwapHandle(tae, action!, AnimUndoTops(tae));
+        }
+
+        // ---------------------------------------------------------------- undo of one exact global action
+
+        /// <summary>A global undo action of ours, plus the top of every per-animation undo stack right after it.</summary>
+        public sealed class SwapHandle
+        {
+            internal SwapHandle(TaeEditorScreen tae, TaeUndoableAction action, Dictionary<TaeUndoMan, TaeUndoableAction?> animTops)
+            {
+                Tae = tae; Action = action; AnimTops = animTops;
+            }
+            internal TaeEditorScreen Tae { get; }
+            internal TaeUndoableAction Action { get; }
+            internal Dictionary<TaeUndoMan, TaeUndoableAction?> AnimTops { get; }
+        }
+
+        private static readonly FieldInfo? UndoStackField = typeof(TaeUndoMan).GetField("UndoStack", Priv);
+
+        private static TaeUndoableAction? Top(TaeUndoMan? man) =>
+            man != null && UndoStackField?.GetValue(man) is Stack<TaeUndoableAction> { Count: > 0 } st ? st.Peek() : null;
+
+        private static Dictionary<TaeUndoMan, TaeUndoableAction?> AnimUndoTops(TaeEditorScreen tae)
+        {
+            var result = new Dictionary<TaeUndoMan, TaeUndoableAction?>();
+            foreach (var man in tae.UndoManDictionary.Values.ToList()) result[man] = Top(man);
+            return result;
+        }
+
+        /// <summary>
+        /// Why <paramref name="h"/> can't be undone by itself now, or null. Undoing a DSAS global action restores the whole
+        /// file as it was before it, so it is refused when anything was done to the file after it: a newer global action on
+        /// top of it, or per-animation edits (their undo stacks moved since).
+        /// </summary>
+        public static string? WhyCantUndo(SwapHandle h)
+        {
+            if (UndoStackField == null) return "This DSAS build has no accessible undo stack.";
+            if (!ReferenceEquals(Tae, h.Tae) || h.Tae.Proj == null) return "The character it was made on is no longer the loaded one.";
+            var top = Top(h.Tae.GlobalUndoMan);
+            if (!ReferenceEquals(top, h.Action))
+            {
+                bool below = UndoStackField.GetValue(h.Tae.GlobalUndoMan) is Stack<TaeUndoableAction> st && st.Contains(h.Action);
+                return below
+                    ? $"Newer [Global] actions were made after it (last: \"{top?.ActionDescription}\"). Undo those first with Edit > Undo [Global] Action (Ctrl+Shift+Z)."
+                    : "It is no longer in the [Global] undo history (already undone, or the file was reloaded).";
+            }
+            int edited = 0;
+            foreach (var man in h.Tae.UndoManDictionary.Values.ToList())
+                if (!ReferenceEquals(Top(man), h.AnimTops.GetValueOrDefault(man))) edited++;
+            if (edited > 0)
+                return $"{edited} animation{(edited == 1 ? " was" : "s were")} edited after the swap; undoing it restores the whole file and would lose " +
+                       "those edits. Undo them first (Ctrl+Z), or use Edit > Undo [Global] Action (Ctrl+Shift+Z) to accept losing them.";
+            return null;
+        }
+
+        /// <summary>Undoes <paramref name="h"/> through DSAS's global undo (its undo callback then reverts the Lua part).</summary>
+        public static void Undo(SwapHandle h)
+        {
+            if (WhyCantUndo(h) is { } why) throw new InvalidOperationException(why);
+            h.Tae.GlobalUndoMan.Undo();
         }
 
         // ---------------------------------------------------------------- add

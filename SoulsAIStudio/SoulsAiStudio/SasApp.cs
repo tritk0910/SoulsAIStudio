@@ -245,6 +245,7 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
             if (ImGui.MenuItem("Swap / Add Animation...", "", false, Bridge.LoadedAnibnd != null)) _animSlots.Open();
+            if (ImGui.MenuItem("Undo Last Animation Swap", "", false, _animSlots.WhyCantUndoLastSwap() == null)) _animSlots.UndoLastSwap(); // anibnd + Lua scripts as one step
             if (ImGui.BeginMenu("Updates"))
             {
                 if (ImGui.MenuItem("Check for Updates...")) _updates.StartCheck(manual: true);
