@@ -1,137 +1,97 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace DSAnimStudio
 {
+    /// <summary>
+    /// Runs actions on one dedicated thread (FMOD must be called from a single thread) and waits for each to finish.
+    /// <para>[SAS] Internals rewritten, same public API. The original kept ONE shared action slot and one pair of
+    /// AutoResetEvents. The UI thread is STA, so while it waited in Invoke Windows could dispatch sent messages on it
+    /// (e.g. Alt+Tab → Main_Deactivated → SoundManager.StopAllSounds → Invoke again). The nested call overwrote the
+    /// pending action and consumed the outer call's signal: the app froze (a wait whose signal never came) and then
+    /// crashed with Exception("?????") when the worker woke up with no action. Now every call has its own completion
+    /// signal and actions run in FIFO order, so nested / concurrent calls can't steal each other's work or signals.</para>
+    /// </summary>
     public class SafeSingleThreadDispatcher : IDisposable
     {
-        private readonly object _lock_Invoke = new object();
-        private readonly object _lock_Params = new object();
+        private sealed class WorkItem
+        {
+            public Action Action;
+            public readonly ManualResetEventSlim Done = new ManualResetEventSlim(false);
+            public ExceptionDispatchInfo Error;
+        }
 
-        private AutoResetEvent event_DoAction = new AutoResetEvent(false);
-        private AutoResetEvent event_ActionFinished = new AutoResetEvent(false);
+        private readonly BlockingCollection<WorkItem> queue = new BlockingCollection<WorkItem>();
+        private readonly Thread thread;
+        private volatile bool stopRequested = false;
 
-        private bool workerLoopRunning = false;
-
-        private bool stopRequested = false;
-
-
-
-
-        private Action nextAction = null;
-
-        private Thread thread;
         public SafeSingleThreadDispatcher()
         {
-            thread = new Thread(ThreadProc);
+            thread = new Thread(ThreadProc) { IsBackground = true, Name = "SafeSingleThreadDispatcher" };
             thread.Start();
         }
 
         public void RequestStop()
         {
-            lock (_lock_Invoke)
-            {
-                bool _stopRequested = false;
-                lock (_lock_Params)
-                    _stopRequested = stopRequested;
-                if (!_stopRequested)
-                {
-
-
-                    lock (_lock_Params)
-                    {
-                        stopRequested = true;
-                        nextAction = null;
-                    }
-
-                    event_DoAction.Set();
-                    event_ActionFinished.WaitOne();
-                }
-            }
+            if (stopRequested)
+                return;
+            stopRequested = true;
+            queue.CompleteAdding(); // the worker finishes what is queued, then exits
+            if (Thread.CurrentThread != thread)
+                thread.Join();
         }
 
         public void Invoke(Action action)
         {
-            lock (_lock_Invoke)
-            {
-                bool _stopRequested = false;
-                lock (_lock_Params)
-                    _stopRequested = stopRequested;
-                if (!_stopRequested)
-                {
-                    lock (_lock_Params)
-                    {
-                        nextAction = action;
-                    }
+            if (action == null || stopRequested)
+                return;
 
-                    event_DoAction.Set();
-                    event_ActionFinished.WaitOne();
-                }
+            // Called from inside an action (same thread): run it now, queueing it would wait on ourselves forever.
+            if (Thread.CurrentThread == thread)
+            {
+                action();
+                return;
             }
-            
+
+            var item = new WorkItem { Action = action };
+            try
+            {
+                queue.Add(item);
+            }
+            catch (InvalidOperationException)
+            {
+                return; // stopped meanwhile (same as the original: calls after a stop are skipped)
+            }
+
+            item.Done.Wait();
+            item.Done.Dispose();
+            item.Error?.Throw(); // an exception in the action surfaces on the caller instead of killing the process
         }
 
         private void ThreadProc()
         {
-
-            workerLoopRunning = true;
-            while (workerLoopRunning)
+            foreach (var item in queue.GetConsumingEnumerable())
             {
-                event_DoAction.WaitOne();
-
-                bool _stopRequested = false;
-                lock (_lock_Params)
-                    _stopRequested = stopRequested;
-
-                if (_stopRequested)
+                try
                 {
-                    workerLoopRunning = false;
-                    event_ActionFinished.Set();
+                    item.Action();
                 }
-                else
+                catch (Exception ex)
                 {
-                    lock (_lock_Params)
-                    {
-                        if (nextAction != null)
-                        {
-                            nextAction();
-                            nextAction = null;
-                        }
-                        else
-                        {
-                            throw new Exception("?????");
-                        }
-                    }
-
-                    event_ActionFinished.Set();
-
+                    item.Error = ExceptionDispatchInfo.Capture(ex);
                 }
-
-
-                
+                finally
+                {
+                    item.Done.Set();
+                }
             }
-
-            
         }
 
         public void Dispose()
         {
-            bool _stopRequested = false;
-            lock (_lock_Params)
-                _stopRequested = stopRequested;
-
-            if (!_stopRequested)
-            {
-                RequestStop();
-                event_DoAction?.Dispose();
-                event_DoAction = null;
-                event_ActionFinished?.Dispose();
-                event_ActionFinished = null;
-            }
+            RequestStop();
         }
     }
 }

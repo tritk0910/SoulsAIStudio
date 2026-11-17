@@ -83,7 +83,7 @@ namespace DSAnimStudio.ImguiOSD
                 //         ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoResize;
                 //ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0);
                 //ImGui.PushStyleColor(ImGuiCol.WindowBg, new System.Numerics.Vector4(0, 0, 0, 0));
-                Flags = ImGuiWindowFlags.NoMove;
+                Flags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.MenuBar; // [SAS] fixed toolbar (category buttons) that doesn't scroll with the list
             }
 
             protected override void PostUpdate()
@@ -255,6 +255,7 @@ namespace DSAnimStudio.ImguiOSD
             {
                 if (MainDoc != Document)
                     return;
+                SoulsAiStudio.App.SasHooks.AnimListToolbar(); // [SAS] Properties / Duplicate / Swap / Add Anim pinned at the top
 
                 lock (_lock_WindowAnimations)
                 {
@@ -541,12 +542,12 @@ namespace DSAnimStudio.ImguiOSD
                                 ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 12);
                                 //ImGui.SameLine();
                                 //test
-                                if (Tools.SimpleClickButton("Properties..."))
+                                if (SoulsAiStudio.App.SasHooks.AnimCategoryButtonsInList && Tools.SimpleClickButton("Properties...")) // [SAS] in the fixed toolbar instead
                                 {
                                     MainTaeScreen.ShowDialogEditAnimCategoryProperties(category);
                                 }
 
-                                if (isDuplicateTaeSectionEnabled)
+                                if (isDuplicateTaeSectionEnabled && SoulsAiStudio.App.SasHooks.AnimCategoryButtonsInList) // [SAS] in the fixed toolbar instead
                                 {
                                     ImGui.SameLine();
                                     if (Tools.SimpleClickButton("Duplicate..."))

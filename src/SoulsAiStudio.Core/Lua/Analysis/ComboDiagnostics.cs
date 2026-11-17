@@ -29,6 +29,14 @@ public static class ComboDiagnostics
     }
 
     /// <summary>
+    /// The candidate marked <see cref="InterruptCandidate.Blocked"/> when Goal.Interrupt can't see it in game: no
+    /// <c>AddObserveSpecialEffectAttribute</c> for it, or only on the other side (e.g. a TAE SpEffect on the character
+    /// observed only on TARGET_ENE_0). Random path and Statistics then never pick it.
+    /// </summary>
+    public static InterruptCandidate WithObserveCheck(SpEffectInterrupts.Table table, InterruptCandidate c) =>
+        c.Blocked || ObservedOnRightTarget(table, c) ? c : c with { Blocked = true };
+
+    /// <summary>
     /// Warnings for a candidate of a step: (a) starts at/after the ComboAttack Queued frame while a next anim is queued,
     /// (b) never observed, (c) observed on the wrong target. Empty when nothing to report.
     /// </summary>

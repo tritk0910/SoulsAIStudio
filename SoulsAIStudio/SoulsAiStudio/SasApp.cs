@@ -23,6 +23,8 @@ namespace SoulsAiStudio.App
         public ProjectSession? Session { get; private set; }
         public SasLayout Layout { get; } = new();
         public DsasBridge Bridge { get; } = new();
+        public Workspaces Workspaces { get; }
+        public SpEffectLuaLink SpEffectLink { get; }
         private bool _autoLoadCharacter;
         private string? _autoLoadChrId;
         private bool _spaceWasDown;
@@ -39,6 +41,7 @@ namespace SoulsAiStudio.App
         private readonly UpdateService _updates;
         private readonly AnimSlotsWindow _animSlots;
         private readonly FindInScriptsPanel _findScripts;
+        private readonly AddScriptsWindow _addScripts;
         private readonly List<string> _errors = new();
         private Task<SasProject>? _openingProject;
         private SasInputProbe? _probe;
@@ -56,6 +59,14 @@ namespace SoulsAiStudio.App
             _updates = new UpdateService(this);
             _animSlots = new AnimSlotsWindow(this);
             _findScripts = new FindInScriptsPanel(this);
+            _addScripts = new AddScriptsWindow(this);
+            Workspaces = new Workspaces(this, new Dictionary<string, (Func<bool>, Action<bool>)>
+            {
+                ["sas:project"] = (() => _scripts.IsOpen, v => _scripts.IsOpen = v),
+                ["sas:editor"] = (() => _editor.IsOpen, v => _editor.IsOpen = v),
+                ["sas:combo"] = (() => _combo.IsOpen, v => _combo.IsOpen = v),
+            });
+            SpEffectLink = new SpEffectLuaLink(this);
             Bridge.FormatSpEffect = SpEffectText;
             SasHooks.ApplyLightingPreset(Settings.Lighting499);
             DSAnimStudio.zzz_NotificationManagerIns.HideNotificationPopups = Settings.HideNotificationPopups;
@@ -194,6 +205,7 @@ namespace SoulsAiStudio.App
                     var files = ResolveCharacterId(id);
                     if (files != null && !IsCharacterLoaded(files)) LoadCharacterId(id);
                 }
+                if (_resetPanelsInFrames > 0 && --_resetPanelsInFrames == 0) ResetPanelLayout();
                 Layout.ApplyIfNeeded(Settings);
                 if (Layout.FocusEditorTabFrames > 0) { if (!Layout.EditorOutsideGraphNode) ImGui.SetWindowFocus(SasLayout.EditorWindow); Layout.FocusEditorTabFrames--; }
                 focused |= _scripts.Build();
@@ -206,13 +218,14 @@ namespace SoulsAiStudio.App
             focused |= _finder.Build(); // works with any loaded character, project or not
             focused |= _spLabels.Build();
             focused |= _animSlots.Build();
+            focused |= _addScripts.Build();
             _updates.Build(); // checks GitHub on the first frame when enabled; shows the window when there is an update
             bool inProject = Session != null;
             Layout.ProbeWindows(new[]
             {
                 (SasLayout.ScriptsWindow, inProject && _scripts.IsOpen), (SasLayout.EditorWindow, inProject && _editor.IsOpen),
                 (ComboPanel.WindowName, inProject && _combo.IsOpen), (LuabndToolsPanel.WindowName, inProject && _luabnd.IsOpen),
-                (EventFinderPanel.WindowName, _finder.IsOpen), (SpEffectLabelsWindow.WindowName, _spLabels.IsOpen),
+                (EventFinderPanel.WindowName, _finder.IsOpen), (SpEffectLabelsWindow.WindowName, _spLabels.IsOpen), (AddScriptsWindow.WindowName, inProject && _addScripts.IsOpen),
             });
             SasHooks.GraphHidden = !Layout.GraphVisible || Layout.WindowNestedInGraph
                                    || (inProject && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId);
@@ -245,6 +258,8 @@ namespace SoulsAiStudio.App
             ImGui.Separator();
             if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
             if (ImGui.MenuItem($"Save All Scripts ({_editor.DirtyCount})", "", false, _editor.DirtyCount > 0)) _editor.SaveAll();
+            if (ImGui.MenuItem("Add AI Scripts...", "", false, Session != null)) _addScripts.Open();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Add more Lua AI scripts (from the mod's or the game's luabnds) to this project.");
             if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
             if (ImGui.MenuItem("Find in Scripts...", "Ctrl+Shift+F", false, Session != null)) OpenFindInScripts();
@@ -279,6 +294,9 @@ namespace SoulsAiStudio.App
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor and Graph share one panel; click the tabs to switch.");
                 if (ImGui.MenuItem("Reset Panel Layout##sas_layout_reset")) ResetPanelLayout();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Put the Souls AI panels back in their default places (keeps the Lua Editor placement above). Panels can also be dragged anywhere by their tab.");
+                if (ImGui.MenuItem("Reset All Panels to Default##sas_layout_resetall")) ResetAllPanels();
+                ImGui.Separator();
+                Workspaces.MenuItems();
                 ImGui.EndMenu();
             }
             if (ImGui.MenuItem("Project Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
@@ -341,7 +359,20 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Luabnd (Unpack / Repack)", "", _luabnd.IsOpen, Session != null)) { if (_luabnd.IsOpen) _luabnd.IsOpen = false; else _luabnd.Open(); }
+            ImGui.Separator();
+            Workspaces.MenuItems();
+            if (ImGui.MenuItem("Reset All Panels to Default")) ResetAllPanels();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("DSAS's default layout, with the Souls AI panels docked in their default places.");
         }
+
+        /// <summary>DSAS's default (V5) dock layout, then our panels docked into it as on first launch.</summary>
+        private void ResetAllPanels()
+        {
+            DSAnimStudio.ImguiOSD.OSD.RequestLoadDefaultLayout = DSAnimStudio.ImguiOSD.OSD.DefaultLayoutTypes.V5;
+            _resetPanelsInFrames = 10; // dock ours once DSAS's windows sit in the new nodes (same frame: wrong / stale node ids)
+        }
+
+        private int _resetPanelsInFrames;
 
         /// <summary>Ctrl+F in the graph / Edit > Find: the Find Events window. False when no character is loaded (DSAS then does nothing).</summary>
         public bool OpenEventFinder()
@@ -445,6 +476,25 @@ namespace SoulsAiStudio.App
         }
 
         public void SaveAllScripts() => _editor.SaveAll();
+
+        /// <summary>Opens the "Add AI Scripts" window; <paramref name="filter"/> prefills its filter.</summary>
+        public void OpenAddScripts(string? filter = null) => _addScripts.Open(filter);
+
+        /// <summary>
+        /// Removes a script from the project (its file in the luabnd is not touched). Refused while its tab has unsaved edits.
+        /// </summary>
+        public void RemoveScript(ProjectScript script)
+        {
+            if (Project == null) return;
+            if (!_editor.TryClose(script.Key))
+            {
+                Notify($"{script.FileName} has unsaved changes: save or undo them first.");
+                return;
+            }
+            Project.Scripts.RemoveAll(s => s.Key == script.Key);
+            SaveProjectUiState();
+            Notify($"Removed {script.FileName} from the project (the script itself is unchanged)");
+        }
 
         // ---------- characters of animations-only projects ----------
 

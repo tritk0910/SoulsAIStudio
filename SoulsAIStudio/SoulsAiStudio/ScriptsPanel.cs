@@ -52,24 +52,29 @@ namespace SoulsAiStudio.App
                 }
                 LayoutSwitch();
 
-                if (project.Scripts.Count > 0)
+                ImGui.Separator();
+                ImGui.Text("AI scripts");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("+ Add...##sas_add_scripts")) _app.OpenAddScripts();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Add more Lua AI scripts to this project (from the mod's or the game's luabnds).");
+                ProjectScript? remove = null;
+                foreach (var s in project.Scripts)
                 {
-                    ImGui.Separator();
-                    ImGui.Text("AI scripts");
-                    foreach (var s in project.Scripts)
+                    bool active = _editor.ActiveScript?.Key == s.Key;
+                    if (ImGui.Selectable($"{s.Label}##{s.Key}", active)) _app.OpenScript(s);
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{s.Luabnd} / {s.EntryPath}\nRight-click: unpack / repack {s.Luabnd}, remove from project");
+                    if (ImGui.BeginPopupContextItem($"##sas_script_ctx_{s.Key}"))
                     {
-                        bool active = _editor.ActiveScript?.Key == s.Key;
-                        if (ImGui.Selectable($"{s.Label}##{s.Key}", active)) _app.OpenScript(s);
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{s.Luabnd} / {s.EntryPath}\nRight-click: unpack / repack {s.Luabnd}");
-                        if (ImGui.BeginPopupContextItem($"##sas_script_ctx_{s.Key}"))
-                        {
-                            if (ImGui.MenuItem($"Unpack / Repack {s.Luabnd}...")) _app.OpenLuabndTools();
-                            ImGui.EndPopup();
-                        }
+                        if (ImGui.MenuItem($"Unpack / Repack {s.Luabnd}...")) _app.OpenLuabndTools();
+                        if (ImGui.MenuItem("Remove from project")) remove = s;
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only removes it from this project's list; the script in the luabnd is not changed.");
+                        ImGui.EndPopup();
                     }
-
-                    if (_editor.ActiveScript is { } script) BuildCharacter(script);
                 }
+                if (remove != null) _app.RemoveScript(remove);
+                if (project.Scripts.Count == 0) ImGui.TextDisabled("None yet: + Add... to work on Lua AI.");
+
+                if (project.Scripts.Count > 0 && _editor.ActiveScript is { } script) BuildCharacter(script);
 
                 ImGui.Separator();
                 BuildCharacters(project);

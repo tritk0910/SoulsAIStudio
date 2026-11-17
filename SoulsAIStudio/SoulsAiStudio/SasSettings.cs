@@ -23,6 +23,8 @@ namespace SoulsAiStudio.App
         /// false = a tab in the Graph's node. Applied when chosen, on Reset Panel Layout and on start (see SasLayout).
         /// </summary>
         public bool EditorBesideGraph { get; set; }
+        /// <summary>DSAS's panels (Viewport, Animations, Parameters…) can't be dragged/undocked (DSAS's own behaviour). Default off: every panel moves.</summary>
+        public bool LockPanelLayout { get; set; }
         /// <summary>Keep the Windows IME active in the Lua editor (default off: its composition text isn't drawn).</summary>
         public bool AllowImeInEditor { get; set; }
         /// <summary>Watch project files for changes made by other programs (Souls AI > Watch Files for External Changes).</summary>

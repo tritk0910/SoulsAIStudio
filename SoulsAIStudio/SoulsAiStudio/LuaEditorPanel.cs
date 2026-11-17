@@ -141,6 +141,18 @@ namespace SoulsAiStudio.App
             return skipped;
         }
 
+        /// <summary>Closes the tab of <paramref name="key"/> if open. False (tab kept) when it has unsaved edits or is saving.</summary>
+        public bool TryClose(string key)
+        {
+            var o = _open.FirstOrDefault(x => x.Script.Key == key);
+            if (o == null) return true;
+            if (o.IsDirty || o.Saving != null) return false;
+            _open.Remove(o);
+            _completions.RemoveDocument(key);
+            if (_active == o) _active = _open.FirstOrDefault();
+            return true;
+        }
+
         public void CloseAll()
         {
             _open.Clear();

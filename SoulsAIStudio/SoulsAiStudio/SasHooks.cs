@@ -23,7 +23,7 @@ namespace SoulsAiStudio.App
         public static volatile bool GraphHidden;
 
         public const string AppName = "Souls AI Studio";
-        public const string AppVersion = "0.3.1";
+        public const string AppVersion = "0.3.2";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
@@ -33,6 +33,11 @@ namespace SoulsAiStudio.App
         {
             try
             {
+                if (!AnimCategoryButtonsInList)
+                {
+                    ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 13); // no button row (it is in the toolbar): start the list right under the tag row (measured: DSAS left a ~20 px gap)
+                    return;
+                }
                 ImGui.SameLine();
                 if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Swap...")) App.OpenAnimSlots(add: false);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Swap two animation ids (events, HKX files and the animations that borrow them)");
@@ -41,6 +46,48 @@ namespace SoulsAiStudio.App
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Add a new empty animation: Override HKX of an existing one, or a .hkx file for this character");
             }
             catch (Exception ex) { App.ReportError("Animation slots", ex); }
+        }
+
+        /// <summary>
+        /// The category buttons (Properties / Duplicate / Swap / Add Anim) live in the Animations panel's fixed toolbar
+        /// (<see cref="AnimListToolbar"/>), not under each category header where they scrolled away with the list.
+        /// </summary>
+        public const bool AnimCategoryButtonsInList = false;
+
+        /// <summary>
+        /// Animations panel, top of its contents: a menu-bar toolbar that never scrolls, acting on the category of the
+        /// selected animation (DSAS drew these buttons under the category header, so a long list had to be scrolled to the top).
+        /// </summary>
+        public static void AnimListToolbar()
+        {
+            try
+            {
+                if (!ImGui.BeginMenuBar()) return;
+                try
+                {
+                    var screen = DSAnimStudio.Main.TAE_EDITOR;
+                    var proj = screen?.FileContainer?.Proj;
+                    var category = screen?.SelectedAnimCategory;
+                    bool has = proj != null && category != null;
+                    ImGui.BeginDisabled(!has);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Props...##sas_at_props")) screen!.ShowDialogEditAnimCategoryProperties(category);
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                        ImGui.SetTooltip(has ? $"Properties of category [{category!.CategoryID}] (the selected animation's)" : "Select an animation first");
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Dup...##sas_at_dup")) screen!.ShowDialogDuplicateToNewTaeSection(proj, category);
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                        ImGui.SetTooltip(has ? $"Duplicate category [{category!.CategoryID}] to a new section" : "Select an animation first");
+                    ImGui.EndDisabled();
+                    bool loaded = App.Bridge.LoadedAnibnd != null;
+                    ImGui.BeginDisabled(!loaded);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Swap...##sas_at_swap")) App.OpenAnimSlots(add: false);
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip("Swap two animation ids (events, HKX files and the animations that borrow them)");
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Add...##sas_at_add")) App.OpenAnimSlots(add: true);
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip("Add a new empty animation: Override HKX of an existing one, or a .hkx file for this character");
+                    ImGui.EndDisabled();
+                }
+                finally { ImGui.EndMenuBar(); }
+            }
+            catch (Exception ex) { App.ReportError("Animations toolbar", ex); }
         }
 
         /// <summary>
@@ -150,6 +197,62 @@ namespace SoulsAiStudio.App
 
         /// <summary>DSAProj: all modified flags cleared (after a save).</summary>
         public static void AllAnimsSaved() => AnimClean.Reset();
+
+        /// <summary>
+        /// DSAS windows that are part of another window (graph helpers), overlays or the documents strip: never moved, and
+        /// closed when floating as DSAS does.
+        /// </summary>
+        private static bool IsFixedDsasWindow(DSAnimStudio.ImguiOSD.Window w) =>
+            w is DSAnimStudio.ImguiOSD.Window.NewTransport or DSAnimStudio.ImguiOSD.Window.DocManToolbar
+                or DSAnimStudio.ImguiOSD.Window.Tooltip or DSAnimStudio.ImguiOSD.Window.Graph_Tracks
+                or DSAnimStudio.ImguiOSD.Window.Graph_Actions or DSAnimStudio.ImguiOSD.Window.NewComboViewer;
+
+        /// <summary>
+        /// DSAS <c>Window.Update</c>: flags of a DSAS panel outside DSAS's debug dock-edit mode. DSAS always added NoMove, so
+        /// Viewport, Animations, Parameters, Graph… could never be dragged by their tab, undocked or re-docked. Unless the
+        /// user locks the layout (Window > Lock Panel Layout), they move like our panels (After Effects-style layout).
+        /// </summary>
+        public static ImGuiWindowFlags DsasWindowFlags(DSAnimStudio.ImguiOSD.Window window, ImGuiWindowFlags dsasFlags)
+        {
+            try
+            {
+                if (App.Settings.LockPanelLayout || IsFixedDsasWindow(window)) return dsasFlags;
+                var flags = dsasFlags & ~ImGuiWindowFlags.NoMove;
+                // Viewport / Graph are NoInputs so the mouse reaches the 3D view / custom-drawn timeline under them, which
+                // also made their tab impossible to grab. Take inputs only over the tab strip, and for the whole drag.
+                if ((flags & ImGuiWindowFlags.NoInputs) != 0)
+                {
+                    // (ImGui.NET 1.87's ImGuiIO field offsets don't match DSAS's native 1.88: use the functions, not io.MousePos.)
+                    Vector2 mouse = ImGui.GetMousePos();
+                    Vector2 pos = window.LastPosition, size = window.LastSize;
+                    float strip = ImGui.GetFrameHeight() + 2;
+                    bool inStrip = mouse.X >= pos.X && mouse.X < pos.X + size.X && mouse.Y >= pos.Y && mouse.Y < pos.Y + strip;
+                    if (!ImGui.IsMouseDown(ImGuiMouseButton.Left)) _tabDragWindow = inStrip ? window : (ReferenceEquals(_tabDragWindow, window) ? null : _tabDragWindow);
+                    if (ReferenceEquals(_tabDragWindow, window)) flags &= ~ImGuiWindowFlags.NoInputs;
+                }
+                return flags;
+            }
+            catch (Exception) { return dsasFlags; }
+        }
+
+        /// <summary>NoInputs DSAS window whose tab strip the mouse is over (or that is being dragged by its tab).</summary>
+        private static DSAnimStudio.ImguiOSD.Window? _tabDragWindow;
+
+        /// <summary>
+        /// DSAS closes a panel that is floating (not docked) as soon as it loses focus. True keeps that behaviour (locked
+        /// layout, fixed windows); false lets a panel dragged out of the dock stay open as a floating window.
+        /// </summary>
+        public static bool CloseUndockedDsasWindow(DSAnimStudio.ImguiOSD.Window window)
+        {
+            try { return App.Settings.LockPanelLayout || IsFixedDsasWindow(window); }
+            catch (Exception) { return true; }
+        }
+
+        /// <summary>Start of DSAS's <c>OSD.Build</c>, before any window of the frame: applies a workspace chosen in a menu.</summary>
+        public static void BeforeOsdBuild()
+        {
+            try { App.Workspaces.ApplyPending(); } catch (Exception ex) { App.ReportError("Workspace", ex); }
+        }
 
         /// <summary>Called from DSAS <c>Window.Update</c> right after <c>ImGui.Begin</c>: reports its dock node.</summary>
         public static void ReportWindowDock(string title, uint dockId) => App.Layout.ReportDock(title, dockId);
@@ -400,10 +503,15 @@ namespace SoulsAiStudio.App
             catch (Exception) { return false; }
         }
 
-        /// <summary>Called by DSAS's Parameters panel after each integer field (StateInfo gets an ON/OFF toggle).</summary>
-        public static void ParameterRowExtras(string? paramName, int value)
+        /// <summary>
+        /// Called by DSAS's Parameters panel after each integer field: StateInfo gets an ON/OFF toggle, the SpEffect id of a
+        /// SpEffect event a "Lua" button (jump to / add its Goal.Interrupt branch).
+        /// </summary>
+        public static void ParameterRowExtras(DSAnimStudio.DSAProj.Action? act, string? paramName, int paramIndex, int value)
         {
             try { StateInfoPanel.ParameterToggle(paramName, value); } catch (Exception ex) { App.ReportError("StateInfo toggle", ex); }
+            try { if (act != null && SpEffectLuaLink.IsSpEffectField(act.Type, paramIndex)) App.SpEffectLink.Draw(value); }
+            catch (Exception ex) { App.ReportError("SpEffect → Lua", ex); }
         }
 
         /// <summary>Replaces DSAS's "Relative Timeline Scrub - Enabled" checkbox in the Action Graph menu.</summary>

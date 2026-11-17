@@ -351,16 +351,15 @@ namespace SoulsAiStudio.App
             var result = new List<InterruptCandidate>();
             foreach (var e in SpEvents(animId))
                 if (_handlers.Handlers.TryGetValue(e.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
-                    result.Add(new InterruptCandidate(e.SpEffectId, e.Frame, e.EndFrame, h,
-                        e.ViaSpEffectId != null ? SpEffectSourceKind.Cycle : SpEffectSourceKind.Tae, ViaText(e)));
+                    result.Add(ComboDiagnostics.WithObserveCheck(_handlers, new InterruptCandidate(e.SpEffectId, e.Frame, e.EndFrame, h,
+                        e.ViaSpEffectId != null ? SpEffectSourceKind.Cycle : SpEffectSourceKind.Tae, ViaText(e))));
             foreach (var b in BehaviorSp(animId))
                 if (_handlers.Handlers.TryGetValue(b.SpEffectId, out var h) && !h.Replans && ComboSequence.AffectsCombo(h.Body))
                 {
                     var c = new InterruptCandidate(b.SpEffectId, b.Frame, b.EndFrame, h, b.Kind,
                         (b.Kind == SpEffectSourceKind.OnHit ? " on hit (" : " (") + LastLink(b.Chain) + ")", Detail: b.Chain);
-                    // An on-hit SpEffect lands on the target: Goal.Interrupt only sees it when observed on TARGET_ENE_0.
-                    if (c.OnHit && !ComboDiagnostics.ObservedOnRightTarget(_handlers, c)) c = c with { Blocked = true };
-                    result.Add(c);
+                    // Goal.Interrupt only sees it when observed on the side it lands on (on hit: TARGET_ENE_0, else TARGET_SELF).
+                    result.Add(ComboDiagnostics.WithObserveCheck(_handlers, c));
                 }
             return result.Count < 2 ? result : result.OrderBy(c => c.Frame).ToList(); // stable: TAE first at equal frames
         }
@@ -522,7 +521,8 @@ namespace SoulsAiStudio.App
                 {
                     var h = c[i].Handler;
                     string text = $"{(warnings[i].Count > 0 ? "(!) " : "")}SpEffect {_app.SpEffectText(c[i].SpEffectId)}{c[i].Via} @ frames {c[i].Frame:0}–{c[i].EndFrame:0} -> Goal.Interrupt line {h.Line + 1}"
-                        + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + ChanceTag(h);
+                        + (h.ClearsQueue ? " (ClearSubGoal)" : ComboSequence.ContainsClear(h.Body) ? " (ClearSubGoal in a branch)" : "") + ChanceTag(h)
+                        + (c[i].Blocked ? " [not observed]" : "");
                     if (warnings[i].Count > 0) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Warn);
                     bool picked = ImGui.Selectable(text + $"##c{i}", i == k);
                     if (warnings[i].Count > 0) ImGui.PopStyleColor();
@@ -532,8 +532,9 @@ namespace SoulsAiStudio.App
                         : "") + (h.OuterDistance
                         ? "\n[distance]: tests the distance to the target, so Random path never picks it.\nCheck the conditions in the code and choose the trigger frame yourself."
                         : "") + (c[i].OnHit
-                        ? "\n[on hit]: applied to the target when this attack hits (frames = hitbox window). Random path and\nStatistics only pick it with \"Attacks hit\" on." + (c[i].Blocked ? " Not observed on TARGET_ENE_0: never picked." : "")
+                        ? "\n[on hit]: applied to the target when this attack hits (frames = hitbox window). Random path and\nStatistics only pick it with \"Attacks hit\" on."
                         : c[i].Kind == SpEffectSourceKind.Behavior ? "\n[behavior]: applied to the character itself when this behavior / bullet event runs." : "")
+                        + (c[i].Blocked ? "\n[not observed]: Goal.Interrupt never sees it in game (no AddObserveSpecialEffectAttribute on the side\nit lands on), so Random path and Statistics never pick it. You can still pick it here to preview." : "")
                         + (c[i].Detail.Length > 0 ? "\nSource: " + c[i].Detail : "")
                         + (warnings[i].Count > 0 ? "\n\n(!) " + string.Join("\n(!) ", warnings[i]) + "\n(hints, not errors)" : "")
                         + "\nRight-click: set a label for this SpEffect"));

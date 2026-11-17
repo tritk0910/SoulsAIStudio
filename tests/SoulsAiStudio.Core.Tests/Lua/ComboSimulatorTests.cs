@@ -55,10 +55,34 @@ public class ComboSimulatorTests
 
     /// <summary>Simulator where anim 3000 has the given SpEffects (frame) and a ComboAttack Queued frame of 20.</summary>
     private static ComboSimulator Sim(params (int Sp, float Frame, SpEffectSourceKind Kind)[] on3000)
+        => Sim(Table, on3000);
+
+    /// <summary>Same, against <paramref name="table"/>; candidates are blocked by the observe check as in the Combo panel.</summary>
+    private static ComboSimulator Sim(SpEffectInterrupts.Table table, params (int Sp, float Frame, SpEffectSourceKind Kind)[] on3000)
     {
-        var list = on3000.Select(x => new InterruptCandidate(x.Sp, x.Frame, x.Frame + 5, Table.Handlers[x.Sp], x.Kind,
-            Blocked: x.Kind == SpEffectSourceKind.OnHit && !ComboDiagnostics.ObservedOnRightTarget(Table, new InterruptCandidate(x.Sp, 0, 0, Table.Handlers[x.Sp], x.Kind)))).ToList();
-        return new ComboSimulator(Table, a => a == 3000 ? list : [], a => a == 3000 ? 20f : null);
+        var list = on3000.Select(x => ComboDiagnostics.WithObserveCheck(table,
+            new InterruptCandidate(x.Sp, x.Frame, x.Frame + 5, table.Handlers[x.Sp], x.Kind))).ToList();
+        return new ComboSimulator(table, a => a == 3000 ? list : [], a => a == 3000 ? 20f : null);
+    }
+
+    [Fact]
+    public void UnobservedSpEffect_NeverPicked()
+    {
+        // 100 handled ("always" arm) but its AddObserveSpecialEffectAttribute removed: Goal.Interrupt never sees it.
+        var noObserve = SpEffectInterrupts.Build(Src.Replace("arg1:AddObserveSpecialEffectAttribute(TARGET_SELF, 100)", ""));
+        var stats = Sim(noObserve, (100, 10, SpEffectSourceKind.Tae)).Run(Act01, 300, new Random(1));
+        Assert.Equal("3000 → 3001 → 3002", Assert.Single(stats.Paths).Key);
+        Assert.DoesNotContain(stats.Interrupts, i => i.SpEffectId == 100);
+    }
+
+    [Fact]
+    public void SelfSpEffectObservedOnlyOnEnemy_NeverPicked()
+    {
+        // 400 is observed on TARGET_ENE_0 only; as a TAE SpEffect it lands on the character itself.
+        var stats = Sim((400, 10, SpEffectSourceKind.Tae)).Run(Act01, 300, new Random(1));
+        Assert.DoesNotContain(stats.Interrupts, i => i.SpEffectId == 400);
+        Assert.True(ComboDiagnostics.WithObserveCheck(Table, new InterruptCandidate(400, 0, 1, Table.Handlers[400])).Blocked);
+        Assert.False(ComboDiagnostics.WithObserveCheck(Table, new InterruptCandidate(100, 0, 1, Table.Handlers[100])).Blocked);
     }
 
     [Fact]

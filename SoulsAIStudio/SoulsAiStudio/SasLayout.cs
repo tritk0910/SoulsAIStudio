@@ -64,6 +64,17 @@ namespace SoulsAiStudio.App
 
         public void RequestApply() => _requested = true;
 
+        /// <summary>A saved workspace replaced the whole dock layout: keep it as it is (no start-up re-docking of the editor).</summary>
+        public void WorkspaceLoaded()
+        {
+            _startCheckDone = true;
+            _placeEditorRequest = null;
+            _requested = false;
+            _nestedFrames = 0;
+            _cooldownFrames = 30;
+            FocusEditorTabFrames = 0;
+        }
+
         /// <summary>Re-docks the Lua Editor soon: beside Graph (50/50, Graph left) or as a tab in Graph's node.</summary>
         public void RequestEditorPlacement(bool besideGraph) => _placeEditorRequest = besideGraph;
 

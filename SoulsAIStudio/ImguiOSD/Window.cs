@@ -207,7 +207,7 @@ namespace DSAnimStudio.ImguiOSD
                     }
                     else
                     {
-                        flags |= ImGuiWindowFlags.NoMove;
+                        flags = SoulsAiStudio.App.SasHooks.DsasWindowFlags(this, flags | ImGuiWindowFlags.NoMove); // [SAS] panels movable/dockable unless the layout is locked
                     }
 
                     if (IsDockable)
@@ -232,7 +232,7 @@ namespace DSAnimStudio.ImguiOSD
                             IsRequestFocus = false;
                         }
 
-                        if (!OSD.DebugIsDockEditMode && !ImGui.IsWindowDocked() && !Focused)
+                        if (!OSD.DebugIsDockEditMode && !ImGui.IsWindowDocked() && !Focused && SoulsAiStudio.App.SasHooks.CloseUndockedDsasWindow(this)) // [SAS] floating panels stay open
                             IsOpen = false;
                         
                         // if (IsFirstFrameOpen)

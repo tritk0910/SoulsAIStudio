@@ -618,7 +618,7 @@ namespace DSAnimStudio.ImguiOSD
                                     ImGui.InputInt(inputIntName + $"###{actIndex}|{pIndex}", ref currentVal, 1, 5, intHex ? (ImGuiInputTextFlags.CharsHexadecimal |
                                     ImGuiInputTextFlags.CharsUppercase) : ImGuiInputTextFlags.None);
                                     anyFieldFocused |= ImGui.IsItemActive();
-                                    SoulsAiStudio.App.SasHooks.ParameterRowExtras(p.Name, currentVal); // [SAS] StateInfo ON/OFF toggle next to the field
+                                    SoulsAiStudio.App.SasHooks.ParameterRowExtras(act, p.Name, pIndex, currentVal); // [SAS] StateInfo ON/OFF toggle, SpEffect → Lua button
 
                                     if (isEnum)
                                         ImGui.PopItemWidth();

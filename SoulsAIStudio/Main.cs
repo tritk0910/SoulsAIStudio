@@ -1365,7 +1365,7 @@ namespace DSAnimStudio
         {
             UpdateActiveState();
 #if !DEBUG
-            zzz_DocumentManager.CurrentDocument?.SoundManager?.StopAllSounds();
+            MainThreadLazyDispatch(() => zzz_DocumentManager.CurrentDocument?.SoundManager?.StopAllSounds()); // [SAS] not re-entrantly: Deactivated can run inside a wait in the sound update (Alt+Tab freeze/crash)
 #endif
         }
 

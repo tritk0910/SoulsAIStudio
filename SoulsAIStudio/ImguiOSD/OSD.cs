@@ -306,6 +306,7 @@ namespace DSAnimStudio.ImguiOSD
                 LoadDefaults(io, RequestLoadDefaultLayout);
                 RequestLoadDefaultLayout = DefaultLayoutTypes.None;
             }
+            SoulsAiStudio.App.SasHooks.BeforeOsdBuild(); // [SAS] saved workspaces are loaded here, before any window of the frame
 
             //if (RequestSaveLayout)
             //{
