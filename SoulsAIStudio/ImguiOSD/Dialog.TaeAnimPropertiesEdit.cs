@@ -218,13 +218,14 @@ namespace DSAnimStudio.ImguiOSD
                 ImGui.Separator();
 
                 
-                bool editInfoAnyFieldFocused = false;
-                NewEditInfo.ShowImGui(ref editInfoAnyFieldFocused, Proj,
-                    GetRect(subtractScrollBar: true).DpiScaled(), 
-                    GetRect(subtractScrollBar: false).DpiScaled(), modified =>
-                {
-                    
-                }, showTagsOnly: false, out bool anyInfoUpdated);
+                bool anyInfoUpdated = false; // [SAS] custom name / description / tags not shown (DSAS editor-only metadata, not needed)
+                //bool editInfoAnyFieldFocused = false;
+                //NewEditInfo.ShowImGui(ref editInfoAnyFieldFocused, Proj,
+                //    GetRect(subtractScrollBar: true).DpiScaled(),
+                //    GetRect(subtractScrollBar: false).DpiScaled(), modified =>
+                //{
+                //
+                //}, showTagsOnly: false, out bool anyInfoUpdated);
 
                 if (anyInfoUpdated)
                     anyValueAdjusted = true;

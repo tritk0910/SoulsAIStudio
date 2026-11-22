@@ -1,6 +1,7 @@
 using SoulsAiStudio.Core.Backup;
 using SoulsAiStudio.Core.Formats.Luabnd;
 using SoulsAiStudio.Core.IO;
+using SoulsAiStudio.Core.Lua.Analysis;
 using SoulsAiStudio.Core.Lua.Decompile;
 
 namespace SoulsAiStudio.Core.Project;
@@ -138,7 +139,59 @@ public sealed class ProjectSession
         {
             return new SaveResult(written, $"The game file was saved, but the unpacked copy could not be updated: {ex.Message}");
         }
+        if (HotReloadStub.Has(text))
+        {
+            try { written.AddRange(WriteHotReloadFiles(script, text)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new SaveResult(written, $"Saved, but the hot reload copy could not be written: {ex.Message}");
+            }
+        }
+        else
+        {
+            try { DeleteHotReloadFiles(script); } // block taken out: no stale copy left in the mod
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
         return new SaveResult(written, null);
+    }
+
+    // ---------- in-game hot reload (HotReloadStub) ----------
+
+    /// <summary>Folder (in the mod) of the plain .lua copies the in-game hot reload stub loads with <c>loadfile</c>.</summary>
+    public string HotReloadDir => Path.Combine(Project.ModDir, "script", "sas_hotreload");
+
+    /// <summary>Absolute paths of the script copy and of its version file, e.g. <c>...\sas_hotreload\m11_02_00_00\540300_battle.lua</c>.</summary>
+    public (string Script, string Version) HotReloadPaths(ProjectScript script)
+    {
+        string dir = Path.GetFullPath(Path.Combine(HotReloadDir, script.Luabnd));
+        string file = Path.Combine(dir, script.FileName);
+        return (file, Path.ChangeExtension(file, ".version"));
+    }
+
+    /// <summary>Writes the script copy, then a new version (the stub reloads when the version changes).</summary>
+    private List<string> WriteHotReloadFiles(ProjectScript script, string text)
+    {
+        var (file, version) = HotReloadPaths(script);
+        using var own = WriteTracker.Track(file, version);
+        AtomicFile.WriteAllText(file, text);
+        AtomicFile.WriteAllText(version, HotReloadStub.VersionFileText(DateTime.Now.ToString("yyyyMMdd-HHmmss.fff")));
+        return [file, version];
+    }
+
+    /// <summary>Removes the hot reload copy of a script (after its stub was taken out and saved). Missing files are fine.</summary>
+    public void DeleteHotReloadFiles(ProjectScript script)
+    {
+        var (file, version) = HotReloadPaths(script);
+        using var own = WriteTracker.Track(file, version);
+        foreach (var f in new[] { version, file })
+            if (File.Exists(f)) File.Delete(f);
+        try
+        {
+            string dir = Path.GetDirectoryName(file)!;
+            if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            if (Directory.Exists(HotReloadDir) && !Directory.EnumerateFileSystemEntries(HotReloadDir).Any()) Directory.Delete(HotReloadDir);
+        }
+        catch (IOException) { }
     }
 
     // ---------- unpack / repack (WitchyBND / Yabber folders) ----------

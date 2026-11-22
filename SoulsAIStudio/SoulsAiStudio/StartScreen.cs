@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.IO;
 using System.Numerics;
 using ImGuiNET;
@@ -91,6 +92,22 @@ namespace SoulsAiStudio.App
     {
         /// <summary>Opaque window background (DSAS makes unfocused windows 65% transparent).</summary>
         public static readonly Vector4 WindowBg = new(0.15f, 0.15f, 0.15f, 1f);
+
+        /// <summary>
+        /// Tooltip whose bottom-left corner sits just above the mouse (ImGui puts it below by default, over what is
+        /// under the button). Use for long tooltips of controls near the bottom of a panel.
+        /// </summary>
+        public static void TooltipAboveMouse(string text)
+        {
+            // A position set by us is not clamped by ImGui: keep the whole tooltip inside the app window.
+            var m = ImGui.GetMousePos();
+            var vp = ImGui.GetMainViewport();
+            var size = ImGui.CalcTextSize(text) + ImGui.GetStyle().WindowPadding * 2;
+            float x = Math.Clamp(m.X + 8, vp.Pos.X + 4, Math.Max(vp.Pos.X + 4, vp.Pos.X + vp.Size.X - size.X - 4));
+            float bottom = Math.Max(m.Y - 6, vp.Pos.Y + size.Y + 4); // not above the top edge either
+            ImGui.SetNextWindowPos(new Vector2(x, bottom), ImGuiCond.Always, new Vector2(0, 1));
+            ImGui.SetTooltip(text.Replace("%", "%%"));
+        }
 
         /// <summary><c>ImGui.Begin</c> with a fully opaque background.</summary>
         public static bool BeginOpaque(string name, ref bool open, ImGuiWindowFlags flags)

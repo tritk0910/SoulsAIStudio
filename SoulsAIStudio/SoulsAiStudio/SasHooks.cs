@@ -1,6 +1,8 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using ImGuiNET;
 
@@ -23,7 +25,7 @@ namespace SoulsAiStudio.App
         public static volatile bool GraphHidden;
 
         public const string AppName = "Souls AI Studio";
-        public const string AppVersion = "0.3.2";
+        public const string AppVersion = "0.4.0";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
@@ -58,6 +60,8 @@ namespace SoulsAiStudio.App
         /// Animations panel, top of its contents: a menu-bar toolbar that never scrolls, acting on the category of the
         /// selected animation (DSAS drew these buttons under the category header, so a long list had to be scrolled to the top).
         /// </summary>
+        private static readonly AnimSearchPopup _animSearch = new();
+
         public static void AnimListToolbar()
         {
             try
@@ -69,19 +73,25 @@ namespace SoulsAiStudio.App
                     var proj = screen?.FileContainer?.Proj;
                     var category = screen?.SelectedAnimCategory;
                     bool has = proj != null && category != null;
+                    ImGui.BeginDisabled(proj == null);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Find##sas_at_find")) _animSearch.Open();
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                        ImGui.SetTooltip("Find an animation by id (3004), name (slash up) or animation file name (a000_021004.hkt), and jump to it");
+                    ImGui.EndDisabled();
+                    _animSearch.Draw(screen);
                     ImGui.BeginDisabled(!has);
-                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Props...##sas_at_props")) screen!.ShowDialogEditAnimCategoryProperties(category);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Props##sas_at_props")) screen!.ShowDialogEditAnimCategoryProperties(category);
                     if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                         ImGui.SetTooltip(has ? $"Properties of category [{category!.CategoryID}] (the selected animation's)" : "Select an animation first");
-                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Dup...##sas_at_dup")) screen!.ShowDialogDuplicateToNewTaeSection(proj, category);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Dup##sas_at_dup")) screen!.ShowDialogDuplicateToNewTaeSection(proj, category);
                     if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                         ImGui.SetTooltip(has ? $"Duplicate category [{category!.CategoryID}] to a new section" : "Select an animation first");
                     ImGui.EndDisabled();
                     bool loaded = App.Bridge.LoadedAnibnd != null;
                     ImGui.BeginDisabled(!loaded);
-                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Swap...##sas_at_swap")) App.OpenAnimSlots(add: false);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Swap##sas_at_swap")) App.OpenAnimSlots(add: false);
                     if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip("Swap two animation ids (events, HKX files and the animations that borrow them)");
-                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Add...##sas_at_add")) App.OpenAnimSlots(add: true);
+                    if (DSAnimStudio.ImguiOSD.Tools.SimpleClickButton("Add##sas_at_add")) App.OpenAnimSlots(add: true);
                     if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip("Add a new empty animation: Override HKX of an existing one, or a .hkx file for this character");
                     ImGui.EndDisabled();
                 }
@@ -265,6 +275,7 @@ namespace SoulsAiStudio.App
         public static bool ReportWindowBegin(DSAnimStudio.ImguiOSD.Window window, bool visible)
         {
             if (ReferenceEquals(window, DSAnimStudio.ImguiOSD.OSD.SpWindowGraph)) App.Layout.ReportGraphBegin(visible);
+            if (ReferenceEquals(window, DSAnimStudio.ImguiOSD.OSD.SpWindowNotifications)) ParametersTabFocus.LogVisible = visible;
             return visible;
         }
 
@@ -424,6 +435,13 @@ namespace SoulsAiStudio.App
             catch (Exception ex) { App.ReportError("Menu error", ex); }
         }
 
+        /// <summary>Top of DSAS's File menu: the Souls AI project items (DSAS's own items, for animation files, follow).</summary>
+        public static void BuildFileMenuProjectItems()
+        {
+            try { App.BuildFileMenuItems(); }
+            catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
         /// <summary>Called from DSAS's menu bar after "Window": the DSAS 4.9.9 "FMOD Sound" menu (dropped in 5.0).</summary>
         public static void FmodSoundMenu(ref bool isAnyMenuExpanded)
         {
@@ -573,7 +591,295 @@ namespace SoulsAiStudio.App
         /// <summary>Called from DSAS's "Action Graph" menu.</summary>
         public static void BuildGraphMenuItems()
         {
-            try { ScrubFollow.MenuItem(); } catch (Exception ex) { App.ReportError("Menu error", ex); }
+            try
+            {
+                ScrubFollow.MenuItem();
+                if (ImGui.MenuItem("Action Text Past Short Blocks", "", App.Settings.GraphTextOverflow))
+                {
+                    App.Settings.GraphTextOverflow = !App.Settings.GraphTextOverflow;
+                    App.Settings.Save();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("On (DSAS 4.9.9): a block's name runs on to the right of a short block, up to the next block on its row,\n" +
+                                     "so short blocks stay readable. Off (DSAS 5.0): the text is cut at the block's end.");
+                GraphViewMenuItems();
+                ImGui.Separator();
+                RemoveEmptyRowsMenuItem();
+                TaeJsonExportMenuItems();
+            }
+            catch (Exception ex) { App.ReportError("Menu error", ex); }
+        }
+
+        // ---------- DSAS 4.9 clipboard JSON (DsasLegacyClipboard) ----------
+
+        /// <summary>
+        /// TAE graph Ctrl+V: if the clipboard holds DSAS 4.9's JSON (copied in DSAS 4.9, or exported here), fills
+        /// <paramref name="into"/> from it and returns true; otherwise false (DSAS reads its own hex clipboard).
+        /// </summary>
+        public static bool PasteLegacyClipboard(string? text, DSAnimStudio.DSAProj proj, DSAnimStudio.DSAProj.ClipboardContents into)
+        {
+            try
+            {
+                if (!DsasLegacyClipboard.TryRead(text, proj, out var actions, out var warnings)) return false;
+                into.Actions = actions;
+                if (warnings.Count > 0)
+                    App.Notify($"Pasted {actions.Count} action(s) from DSAS 4.9 JSON; check these:\n  " + string.Join("\n  ", warnings.Take(8)) +
+                               (warnings.Count > 8 ? $"\n  ... and {warnings.Count - 8} more" : ""));
+                else App.Notify($"Pasted {actions.Count} action(s) from DSAS 4.9 JSON.");
+                return true;
+            }
+            catch (Exception ex) { App.ReportError("Pasting DSAS 4.9 JSON", ex); return false; }
+        }
+
+        // ---------- animation name (F2) ----------
+
+        /// <summary>
+        /// F2 / Edit &gt; Edit Current Animation Name: renames the animation's Anim File Name (the name stored in the TAE,
+        /// shown in the list), as DSAS 4.9 did, instead of DSAS 5's custom display name. A custom name the animation still
+        /// has is cleared so the list shows the new file name. One undo step. Always returns true (DSAS's dialog skipped).
+        /// </summary>
+        public static bool RenameAnimFileName(DSAnimStudio.TaeEditor.TaeEditorScreen tae, DSAnimStudio.DSAProj proj, DSAnimStudio.DSAProj.Animation? anim)
+        {
+            try
+            {
+                if (anim == null || anim.IS_DUMMY_ANIM) return true;
+                var header = anim.SAFE_GetHeaderClone();
+                if (header == null) { App.Notify("This animation has no header to rename."); return true; }
+                string id = anim.SplitID.GetFormattedIDString(proj);
+                string current = header.AnimFileName ?? "";
+                DSAnimStudio.ImguiOSD.DialogManager.AskForInputString("Rename Animation", $"Anim File Name of {id}:", "", result =>
+                {
+                    string? name = string.IsNullOrWhiteSpace(result) ? null : result.Trim();
+                    if ((name ?? "") == current && string.IsNullOrEmpty(anim.Info.DisplayName)) return;
+                    tae.GetUndoManForSpecificAnim(anim).NewAction(() =>
+                    {
+                        var h = anim.SAFE_GetHeaderClone();
+                        h.AnimFileName = name;
+                        anim.SAFE_SetHeader(h);
+                        anim.Info.DisplayName = null;
+                    }, actionDescription: $"Rename animation {id}");
+                    anim.SAFE_SetIsModified(true);
+                    tae.RecreateAnimList();
+                    tae.UpdateSelectedTaeAnimInfoText();
+                }, checkError: null, canBeCancelled: true, startingText: current);
+            }
+            catch (Exception ex) { App.ReportError("Rename animation", ex); }
+            return true;
+        }
+
+        // ---------- TAE graph: vertical zoom, selection focus ----------
+
+        public const float GraphRowHeightMin = 12f, GraphRowHeightMax = 48f, GraphRowHeightDefault = 16f;
+
+        /// <summary>Row height the graph uses (read every frame by its layout).</summary>
+        public static float GraphRowHeight => Math.Clamp(App.Settings.GraphRowHeight, GraphRowHeightMin, GraphRowHeightMax);
+
+        /// <summary>Font size for graph texts drawn at <paramref name="baseSize"/> with DSAS's 16 px rows.</summary>
+        public static float GraphTextSize(float baseSize) => baseSize * GraphRowHeight / GraphRowHeightDefault;
+
+        /// <summary>Ctrl+wheel over the graph: with Shift, changes the row height (true = handled; DSAS zooms time otherwise).</summary>
+        public static bool GraphRowZoomWheel(bool shift, float wheelDelta)
+        {
+            if (!shift) return false;
+            if (wheelDelta != 0) SetGraphRowHeight(GraphRowHeight * MathF.Pow(1.12f, Math.Sign(wheelDelta)));
+            return true;
+        }
+
+        private static DateTime _rowHeightSaveAt = DateTime.MaxValue;
+
+        public static void SetGraphRowHeight(float h)
+        {
+            h = MathF.Round(Math.Clamp(h, GraphRowHeightMin, GraphRowHeightMax));
+            if (h == App.Settings.GraphRowHeight) return;
+            App.Settings.GraphRowHeight = h;
+            _rowHeightSaveAt = DateTime.UtcNow.AddSeconds(1); // saved once the wheel stops (SaveGraphRowHeightIfDue)
+        }
+
+        private static void SaveGraphRowHeightIfDue()
+        {
+            if (DateTime.UtcNow < _rowHeightSaveAt) return;
+            _rowHeightSaveAt = DateTime.MaxValue;
+            App.Settings.Save();
+        }
+
+        private static bool SelectionFocus(List<DSAnimStudio.DSAProj.Action> selected) =>
+            App.Settings.GraphDimUnselected && selected.Count > 0;
+
+        /// <summary>Drawing a block: while some actions are selected, the others are darkened (the selection stands out).</summary>
+        public static void DimIfNotSelected(DSAnimStudio.DSAProj.Action act, List<DSAnimStudio.DSAProj.Action> selected, DSAnimStudio.DSAProj.Action? inspector,
+            ref Microsoft.Xna.Framework.Color fill, ref Microsoft.Xna.Framework.Color line, ref Microsoft.Xna.Framework.Color text)
+        {
+            SaveGraphRowHeightIfDue();
+            if (!SelectionFocus(selected) || act == inspector || selected.Contains(act)) return;
+            fill = Dim(fill, 0.4f);
+            line = Dim(line, 0.4f);
+            text = Dim(text, 0.5f);
+        }
+
+        /// <summary>Over the rows' background, under the blocks: darker while actions are selected.</summary>
+        public static void DimGraphBackground(List<DSAnimStudio.DSAProj.Action> selected, float width, float height)
+        {
+            if (!SelectionFocus(selected)) return;
+            DSAnimStudio.ImGuiDebugDrawer.DrawRect(Microsoft.Xna.Framework.Vector2.Zero, new Microsoft.Xna.Framework.Vector2(width, height),
+                Microsoft.Xna.Framework.Color.Black * 0.35f);
+        }
+
+        private static Microsoft.Xna.Framework.Color Dim(Microsoft.Xna.Framework.Color c, float k) =>
+            new((byte)(c.R * k), (byte)(c.G * k), (byte)(c.B * k), c.A);
+
+        private static void GraphViewMenuItems()
+        {
+            if (ImGui.MenuItem("Darken Unselected Actions", "", App.Settings.GraphDimUnselected))
+            {
+                App.Settings.GraphDimUnselected = !App.Settings.GraphDimUnselected;
+                App.Settings.Save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("While one or more blocks are selected, the other blocks and the background are darkened.");
+            float h = GraphRowHeight;
+            ImGui.SetNextItemWidth(160);
+            if (ImGui.SliderFloat("Row Height (Ctrl+Shift+Wheel)", ref h, GraphRowHeightMin, GraphRowHeightMax, "%.0f px"))
+                SetGraphRowHeight(h);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Vertical zoom of the action graph: taller rows and bigger text.\n" +
+                                 "Ctrl+Shift+mouse wheel over the graph does the same (Ctrl+wheel zooms time). Right-click: reset to 16.");
+            if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) SetGraphRowHeight(GraphRowHeightDefault);
+        }
+
+        /// <summary>DSAS opening an anibnd that has a .dsaproj: true = build the TAE from the anibnd (our Reload), see DsasBridge.</summary>
+        public static bool ReadTaeFromAnibndInstead(string dsaprojPath)
+        {
+            try { return App.Bridge.ShouldReadTaeFromAnibnd(dsaprojPath); }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>After DSAS built the TAE from the anibnd: anim names from the .dsaproj (on our Reload only).</summary>
+        public static void AfterTaeFromAnibnd(DSAnimStudio.DSAProj proj, string dsaprojPath, SoulsAssetPipeline.Animation.TAE.Template template, DSAnimStudio.zzz_DocumentIns doc)
+        {
+            try { App.Bridge.AfterTaeFromAnibnd(proj, dsaprojPath, template, doc); }
+            catch (Exception ex) { App.ReportError("Reload: animation names", ex); }
+        }
+
+        /// <summary>
+        /// File menu toggles stored in DSAS's config (game file caching, config autosaving): DSAS only wrote the config when
+        /// autosaving was on, so turning autosaving off (or changing caching with it off) was lost at the next start. A change
+        /// now writes the config once, on the next frame (after the new value is assigned).
+        /// </summary>
+        public static bool SaveConfigIfChanged(bool oldValue, bool newValue)
+        {
+            if (oldValue != newValue)
+                DSAnimStudio.Main.MainThreadLazyDispatch(() =>
+                {
+                    try { DSAnimStudio.Main.SaveConfig(isManual: true); }
+                    catch (Exception ex) { App.ReportError("Saving the config", ex); }
+                });
+            return newValue;
+        }
+
+        /// <summary>TAE graph paste (inside its undo step): names the rows DSAS just added and drops rows left empty.</summary>
+        public static void AfterPasteActions(DSAnimStudio.DSAProj.Animation? anim, DSAnimStudio.DSAProj? proj)
+        {
+            if (anim == null) return;
+            try
+            {
+                TaeTrackTools.RemoveEmptyTracks(anim);
+                TaeTrackTools.NameUnnamedTracks(anim, proj);
+            }
+            catch (Exception ex) { App.ReportError("After paste", ex); }
+        }
+
+        private static void RemoveEmptyRowsMenuItem()
+        {
+            var tae = DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen;
+            var anim = tae?.SelectedAnim;
+            bool has = anim != null && tae?.CurrentAnimUndoMan != null;
+            if (ImGui.MenuItem("Remove Empty Rows (Current Animation)", "", false, has) && has)
+            {
+                int removed = 0;
+                tae!.CurrentAnimUndoMan.NewAction(() =>
+                {
+                    removed = TaeTrackTools.RemoveEmptyTracks(anim!);
+                    TaeTrackTools.NameUnnamedTracks(anim!, tae.FileContainer?.Proj);
+                }, () => { }, "Remove empty rows");
+                if (removed > 0) anim!.SAFE_SetIsModified(true);
+                App.Notify(removed > 0 ? $"Removed {removed} empty row(s)." : "No empty row in this animation.");
+            }
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip("Deletes the rows of the selected animation that hold no action (undo: Ctrl+Z).\nPasting actions also does this.");
+        }
+
+        private static void TaeJsonExportMenuItems()
+        {
+            var tae = DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen;
+            var anim = tae?.SelectedAnim;
+            bool has = tae?.FileContainer?.Proj != null && anim != null;
+            if (ImGui.MenuItem("Export Current TAE as JSON (DSAS 4.9) to Clipboard", "", false, has) && has)
+            {
+                var actions = anim!.SAFE_GetActions();
+                System.Windows.Forms.Clipboard.SetText(DsasLegacyClipboard.Write(actions));
+                App.Notify($"Copied the {actions.Count} action(s) of {anim.SplitID.GetFormattedIDString(tae!.FileContainer.Proj)} as DSAS 4.9 JSON: paste in DSAS 4.9 with Ctrl+V.");
+            }
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip("Every action of the selected animation, in DS Anim Studio 4.9's clipboard format.\n" +
+                                 "Paste it in DSAS 4.9 with Ctrl+V. (Ctrl+V here also accepts what DSAS 4.9 copies.)");
+            if (ImGui.MenuItem("Export Current TAE as JSON (DSAS 4.9) to File...", "", false, has) && has)
+            {
+                string id = anim!.SplitID.GetFormattedIDString(tae!.FileContainer.Proj);
+                using var dlg = new System.Windows.Forms.SaveFileDialog
+                {
+                    Title = "Export current TAE as JSON (DSAS 4.9 clipboard format)",
+                    Filter = "JSON (*.json)|*.json|All files (*.*)|*.*",
+                    FileName = id + ".tae.json",
+                };
+                if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    try
+                    {
+                        var actions = anim.SAFE_GetActions();
+                        File.WriteAllText(dlg.FileName, DsasLegacyClipboard.Write(actions));
+                        App.Notify($"Exported the {actions.Count} action(s) of {id} to {Path.GetFileName(dlg.FileName)}.");
+                    }
+                    catch (Exception ex) { App.ReportError("Exporting the TAE as JSON", ex); }
+                }
+            }
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip("Same JSON, saved to a file (open it, copy all, paste in DSAS 4.9).");
+        }
+
+        private static object? _textRowsFor;
+        private static readonly Dictionary<int, List<int>> _textRowStarts = new();
+
+        /// <summary>
+        /// TAE graph, drawing a block's text: right edge (graph pixels) of the area its text may use. DSAS 5.0 clipped it to
+        /// the block, so a short block only showed "Spaw…". Like DSAS 4.9.9 the text now runs on up to the start of the next
+        /// block on the same row (never over another block). Starts per row are gathered once per frame (per action list).
+        /// </summary>
+        public static int ActionTextRight(DSAnimStudio.DSAProj.Action act, int blockRight, List<DSAnimStudio.DSAProj.Action> all,
+            Func<DSAnimStudio.DSAProj.Action, int> rowOf, float secondsPixelSize)
+        {
+            try
+            {
+                if (!App.Settings.GraphTextOverflow) return blockRight;
+                if (!ReferenceEquals(_textRowsFor, all))
+                {
+                    _textRowsFor = all;
+                    _textRowStarts.Clear();
+                    foreach (var a in all)
+                    {
+                        int r = rowOf(a);
+                        if (!_textRowStarts.TryGetValue(r, out var list)) _textRowStarts[r] = list = new List<int>();
+                        list.Add((int)(a.StartTime * secondsPixelSize));
+                    }
+                    foreach (var list in _textRowStarts.Values) list.Sort();
+                }
+                if (!_textRowStarts.TryGetValue(rowOf(act), out var starts)) return blockRight;
+                int start = (int)(act.StartTime * secondsPixelSize);
+                // First block starting after this one (blocks starting inside it keep the old clip at its end).
+                foreach (int s in starts)
+                    if (s > start) return Math.Max(blockRight, s - 2);
+                return int.MaxValue / 4; // last block on its row: up to the visible edge (the caller clamps)
+            }
+            catch (Exception) { return blockRight; }
         }
 
         // ---- Entity window: redesigned StateInfo Toggle section ----

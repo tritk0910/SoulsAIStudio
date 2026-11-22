@@ -18,6 +18,7 @@ namespace DSAnimStudio.ImguiOSD
             {
                 isAnyMenuExpanded = true;
 
+                SoulsAiStudio.App.SasHooks.BuildFileMenuProjectItems(); // [SAS] project items (New / Open / Recent / Save Script...) at the top of File
                 bool clickedOpen = ClickItem("Open...");
                 if (ImGui.IsItemActive())
                     anyItemFocused = true;
@@ -83,7 +84,7 @@ namespace DSAnimStudio.ImguiOSD
                 bool clickedReloadGameParam = ClickItem("Reload GameParam and FMGs", enabled: Tae.IsFileOpen);
                 zzz_ParamManagerIns.AutoParamReloadEnabled = Checkbox("Auto Reload Params When File Is Written To", zzz_ParamManagerIns.AutoParamReloadEnabled);
                 ImGui.Separator();
-                zzz_GameDataIns.EnableFileCaching = Checkbox("Enable Game File Caching", zzz_GameDataIns.EnableFileCaching);
+                zzz_GameDataIns.EnableFileCaching = SoulsAiStudio.App.SasHooks.SaveConfigIfChanged(zzz_GameDataIns.EnableFileCaching, Checkbox("Enable Game File Caching", zzz_GameDataIns.EnableFileCaching)); // [SAS] keep the choice
                 ImGui.Separator();
                 bool clickedSave = ClickItem("Save", enabled: Tae.IsFileOpen && Tae.IsModified, shortcut: "Ctrl+S");
                 //bool clickedSaveAs = ClickItem("Save As...", enabled: Tae.IsFileOpen, shortcut: "Ctrl+Shift+S");
@@ -140,7 +141,7 @@ namespace DSAnimStudio.ImguiOSD
                 ImGui.NewLine();
                 ImGui.Separator();
                 bool clickedSaveConfigManually = ClickItem("Save Config File");
-                Main.DisableConfigFileAutoSave = !Checkbox("Enable Config File Autosaving", !Main.DisableConfigFileAutoSave);
+                Main.DisableConfigFileAutoSave = !SoulsAiStudio.App.SasHooks.SaveConfigIfChanged(!Main.DisableConfigFileAutoSave, Checkbox("Enable Config File Autosaving", !Main.DisableConfigFileAutoSave)); // [SAS] turning it off was never saved (autosave off = no save)
                 bool clickedLoadConfigManually = ClickItem("Reload Config File");
                 bool clickedResetConfigToDefault = ClickItem("Reset Config File To Defaults...");
                 bool clickedToggleRegisterProtocolHandler = ClickItem(Main.IsProtocolHandlerInstalled() ? "Unregister Protocol Handler" : "Register Protocol Handler");

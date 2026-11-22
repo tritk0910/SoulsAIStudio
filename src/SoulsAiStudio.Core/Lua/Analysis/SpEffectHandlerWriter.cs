@@ -173,10 +173,15 @@ public static class SpEffectHandlerWriter
 
     private static Insert? ObserveInsert(string src, List<LuaToken> t, List<string> lines, IReadOnlyList<GoalFunction> outline, int id, string target)
     {
-        // After the last observe on the same target (else the last observe at all), with its receiver and indentation.
+        // Observes are registered in Goal.Activate (Goal.Interrupt only reacts to them): after the last observe of
+        // Goal.Activate on the same target (else its last observe at all), with its receiver and indentation.
+        // Observes elsewhere in the file (e.g. a stray one in Goal.Interrupt) are never used as the anchor.
+        var activate = outline.FirstOrDefault(g => g.Name == "Activate");
+        if (activate == null) return null;
         int lastAny = -1, lastSame = -1;
         for (int j = 1; j + 3 < t.Count; j++)
-            if (t[j].Is(src, ":") && t[j + 1].Is(src, "AddObserveSpecialEffectAttribute") && t[j + 2].Is(src, "("))
+            if (t[j].Line > activate.Line && t[j].Line < activate.EndLine
+                && t[j].Is(src, ":") && t[j + 1].Is(src, "AddObserveSpecialEffectAttribute") && t[j + 2].Is(src, "("))
             {
                 lastAny = j;
                 if (t[j + 3].Is(src, target)) lastSame = j;
@@ -188,8 +193,6 @@ public static class SpEffectHandlerWriter
             string recv = t[at - 1].Text(src).ToString();
             return new Insert(line + 1, new[] { $"{Indent(lines, line)}{recv}:AddObserveSpecialEffectAttribute({target}, {id})" });
         }
-        var activate = outline.FirstOrDefault(g => g.Name == "Activate");
-        if (activate == null) return null;
         var prm = activate.Parameters.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (prm.Length < 2) return null;
         string ind = Indent(lines, activate.Line + 1) is { Length: > 0 } i0 ? i0 : Indent(lines, activate.Line) + IndentUnit(lines);

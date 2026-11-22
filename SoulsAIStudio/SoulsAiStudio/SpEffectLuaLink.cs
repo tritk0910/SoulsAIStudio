@@ -156,6 +156,30 @@ namespace SoulsAiStudio.App
         /// Adds the observe + Goal.Interrupt branch in the script's editor tab (unsaved, one undo step) and puts the caret on
         /// the empty line of the new branch, ready for its AddSubGoal lines.
         /// </summary>
+        public void AddTo(ProjectScript script, int id, string target) => Add(script, id, target);
+
+        private int _pending;
+
+        /// <summary>Opens the SpEffect's popup (scripts of the loaded character) from elsewhere, e.g. the Combo panel's menus.</summary>
+        public void Request(int spEffectId) => _pending = spEffectId;
+
+        /// <summary>Every frame at the top level (SasApp): shows the popup requested with <see cref="Request"/>.</summary>
+        public void DrawRequested()
+        {
+            if (_pending > 0)
+            {
+                _popupSpEffect = _pending;
+                _pending = 0;
+                Refresh();
+                ImGui.OpenPopup(PopupId + "_req");
+            }
+            if (_popupSpEffect > 0 && ImGui.BeginPopup(PopupId + "_req"))
+            {
+                try { DrawPopup(_popupSpEffect); }
+                finally { ImGui.EndPopup(); }
+            }
+        }
+
         private void Add(ProjectScript script, int id, string target) => Open(script, o =>
         {
             string old = o.Editor.Text;
@@ -177,7 +201,7 @@ namespace SoulsAiStudio.App
         });
 
         /// <summary>Replaces only the lines between the first and the last changed line, as one undo step.</summary>
-        private static bool ApplyChangedLines(OpenScript o, string oldText, string newText)
+        internal static bool ApplyChangedLines(OpenScript o, string oldText, string newText)
         {
             var a = oldText.Split('\n');
             var b = newText.Split('\n');

@@ -19,6 +19,7 @@ namespace SoulsAiStudio.App
     {
         public SasSettings Settings { get; } = SasSettings.Load();
         private readonly ViewportLightingStore _lighting;
+        private readonly ParametersTabFocus _paramsTab = new(); // Parameters tab in front on launch / graph selection
         public RecentProjects Recent { get; } = new(Path.Combine(SasSettings.UserDataDir, "recent.json"));
         public ProjectSession? Session { get; private set; }
         public SasLayout Layout { get; } = new();
@@ -26,6 +27,8 @@ namespace SoulsAiStudio.App
         public Workspaces Workspaces { get; }
         public SpEffectLuaLink SpEffectLink { get; }
         private bool _autoLoadCharacter;
+        /// <summary>Set when a project is opened: its character is reloaded even if it is the one already open.</summary>
+        private bool _reloadIfAlreadyLoaded;
         private string? _autoLoadChrId;
         private bool _spaceWasDown;
         public SasProject? Project => Session?.Project;
@@ -128,6 +131,7 @@ namespace SoulsAiStudio.App
             _autoLoadChrId = project.Characters.FirstOrDefault(c => c.ChrId == project.Ui.OpenCharacter)?.ChrId
                              ?? (reopen == null ? project.Characters.FirstOrDefault()?.ChrId : null);
             _autoLoadCharacter = reopen != null && _autoLoadChrId == null;
+            _reloadIfAlreadyLoaded = true; // opening (again) a project reloads its character, TAE included, from disk
             if (project.IsAnimationsOnly) _combo.SelectManualTab();
             Notify($"Opened project '{project.Name}'.");
         }
@@ -171,6 +175,7 @@ namespace SoulsAiStudio.App
 
             HandleComboSpace();
             _lighting.Tick();
+            _paramsTab.Tick(Layout);
             // Skybox preset once, after DSAS has loaded its config and cubemaps (an editor document exists).
             if (Settings.SkyboxPresetVersion < 1 && DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen != null
                 && SasHooks.ApplySkyboxPreset(Settings.Lighting499))
@@ -196,14 +201,16 @@ namespace SoulsAiStudio.App
                 {
                     _autoLoadCharacter = false;
                     var files = ResolveCharacter(s);
-                    if (files != null && !IsCharacterLoaded(files)) LoadCharacter(s);
+                    if (files != null && (!IsCharacterLoaded(files) || _reloadIfAlreadyLoaded)) LoadCharacter(s);
+                    _reloadIfAlreadyLoaded = false;
                 }
                 if (_autoLoadChrId != null && DSAnimStudio.zzz_DocumentManager.CurrentDocument != null)
                 {
                     string id = _autoLoadChrId;
                     _autoLoadChrId = null;
                     var files = ResolveCharacterId(id);
-                    if (files != null && !IsCharacterLoaded(files)) LoadCharacterId(id);
+                    if (files != null && (!IsCharacterLoaded(files) || _reloadIfAlreadyLoaded)) LoadCharacterId(id, force: _reloadIfAlreadyLoaded);
+                    _reloadIfAlreadyLoaded = false;
                 }
                 if (_resetPanelsInFrames > 0 && --_resetPanelsInFrames == 0) ResetPanelLayout();
                 Layout.ApplyIfNeeded(Settings);
@@ -215,6 +222,7 @@ namespace SoulsAiStudio.App
                 PollFileWatch(); // external changes: reload / banners (SasApp.Watch.cs)
             }
             focused |= _findScripts.Build(); // also cancels its search when the project closes
+            SpEffectLink.DrawRequested(); // SpEffect popup opened from the Combo panel
             focused |= _finder.Build(); // works with any loaded character, project or not
             focused |= _spLabels.Build();
             focused |= _animSlots.Build();
@@ -243,24 +251,8 @@ namespace SoulsAiStudio.App
             DSAnimStudio.ImguiOSD.OSD.RequestShowWelcome = false;
             if (!ImGui.BeginMenu("Souls AI")) return;
             isAnyMenuExpanded = true;
-            if (ImGui.MenuItem("Start Screen")) ShowStartScreen();
-            if (ImGui.MenuItem("New Project...")) ShowNewProjectWizard();
-            if (ImGui.MenuItem("Open Project...")) BrowseAndOpenProject();
-            if (ImGui.BeginMenu("Recent Projects", Recent.Paths.Count > 0))
-            {
-                foreach (string p in Recent.Paths)
-                    if (ImGui.MenuItem(Path.GetFileNameWithoutExtension(p), "", false, File.Exists(p))) OpenProject(p);
-                ImGui.Separator();
-                if (ImGui.MenuItem("Clear Recent Projects")) Recent.Clear();
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Forget the list. Project files are not deleted.");
-                ImGui.EndMenu();
-            }
-            ImGui.Separator();
-            if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
-            if (ImGui.MenuItem($"Save All Scripts ({_editor.DirtyCount})", "", false, _editor.DirtyCount > 0)) _editor.SaveAll();
-            if (ImGui.MenuItem("Add AI Scripts...", "", false, Session != null)) _addScripts.Open();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Add more Lua AI scripts (from the mod's or the game's luabnds) to this project.");
-            if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
+            // Project items (New / Open / Recent / Save Script / Close) are in the File menu (BuildFileMenuItems); panel toggles
+            // in Window; Follow Playhead in Action Graph. This menu keeps the AI tools only.
             if (ImGui.MenuItem("Find Events...", "Ctrl+F", false, DSAnimStudio.zzz_DocumentManager.CurrentDocument?.EditorScreen?.IsFileOpen == true)) OpenEventFinder();
             if (ImGui.MenuItem("Find in Scripts...", "Ctrl+Shift+F", false, Session != null)) OpenFindInScripts();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Find SpEffects, attacks, bullets, FFX, sounds… by id in every animation of the loaded character.");
@@ -293,18 +285,12 @@ namespace SoulsAiStudio.App
                 if (ImGui.MenuItem("Lua Editor as tab next to Graph", "", !Settings.EditorBesideGraph)) SetEditorPlacement(false);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Lua Editor and Graph share one panel; click the tabs to switch.");
                 if (ImGui.MenuItem("Reset Panel Layout##sas_layout_reset")) ResetPanelLayout();
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Put the Souls AI panels back in their default places (keeps the Lua Editor placement above). Panels can also be dragged anywhere by their tab.");
-                if (ImGui.MenuItem("Reset All Panels to Default##sas_layout_resetall")) ResetAllPanels();
-                ImGui.Separator();
-                Workspaces.MenuItems();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Put the Souls AI panels back in their default places (keeps the Lua Editor placement above). Panels can also be dragged anywhere by their tab.\n" +
+                                                            "Workspaces, Reset All Panels and the panel list are in the Window menu.");
                 ImGui.EndMenu();
             }
-            if (ImGui.MenuItem("Project Panel", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
-            if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
-            if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
             WatchFilesMenuItem();
-            SasHooks.ScrubFollow.MenuItem();
             if (ImGui.MenuItem("Lighting Like DSAS 4.9.9", "", Settings.Lighting499))
             {
                 Settings.Lighting499 = !Settings.Lighting499;
@@ -326,8 +312,30 @@ namespace SoulsAiStudio.App
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("On: during a TAE Blend the character's movement mixes the previous and the new anim by blend weight.\n" +
                                  "Off (DSAS 5.0): movement follows only the new anim, so it can stop or jump when a blend starts.");
-            if (ImGui.MenuItem("Reset Panel Layout", "", false, Session != null)) ResetPanelLayout();
             ImGui.EndMenu();
+        }
+
+        /// <summary>Top of DSAS's File menu: project items, then DSAS's own items (animation files) under a small header.</summary>
+        public void BuildFileMenuItems()
+        {
+            ImGui.TextDisabled("Souls AI project");
+            if (ImGui.MenuItem("Start Screen")) ShowStartScreen();
+            if (ImGui.MenuItem("New Project...")) ShowNewProjectWizard();
+            if (ImGui.MenuItem("Open Project...")) BrowseAndOpenProject();
+            if (ImGui.BeginMenu("Recent Projects", Recent.Paths.Count > 0))
+            {
+                foreach (string p in Recent.Paths)
+                    if (ImGui.MenuItem(Path.GetFileNameWithoutExtension(p), "", false, File.Exists(p))) OpenProject(p);
+                ImGui.Separator();
+                if (ImGui.MenuItem("Clear Recent Projects")) Recent.Clear();
+                ImGui.EndMenu();
+            }
+            if (ImGui.MenuItem("Add AI Scripts...", "", false, Session != null)) _addScripts.Open();
+            if (ImGui.MenuItem("Save Script", "Ctrl+S", false, _editor.ActiveIsDirty)) _editor.SaveActive();
+            if (ImGui.MenuItem($"Save All Scripts ({_editor.DirtyCount})", "", false, _editor.DirtyCount > 0)) _editor.SaveAll();
+            if (ImGui.MenuItem("Close Project", "", false, Session != null)) CloseProject();
+            ImGui.Separator();
+            ImGui.TextDisabled("Animation files (TAE)");
         }
 
         /// <summary>
@@ -358,7 +366,6 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("Project", "", _scripts.IsOpen, Session != null)) _scripts.IsOpen = !_scripts.IsOpen;
             if (ImGui.MenuItem("Lua Editor", "", _editor.IsOpen, Session != null)) _editor.IsOpen = !_editor.IsOpen;
             if (ImGui.MenuItem("Combo Player", "", _combo.IsOpen, Session != null)) _combo.IsOpen = !_combo.IsOpen;
-            if (ImGui.MenuItem("Luabnd (Unpack / Repack)", "", _luabnd.IsOpen, Session != null)) { if (_luabnd.IsOpen) _luabnd.IsOpen = false; else _luabnd.Open(); }
             ImGui.Separator();
             Workspaces.MenuItems();
             if (ImGui.MenuItem("Reset All Panels to Default")) ResetAllPanels();
@@ -528,12 +535,12 @@ namespace SoulsAiStudio.App
         }
 
         /// <summary>Loads a project character's model + animations into DSAS.</summary>
-        public void LoadCharacterId(string chrId)
+        public void LoadCharacterId(string chrId, bool force = false)
         {
             if (Project == null) return;
             var files = ResolveCharacterId(chrId);
             if (files == null) { Notify($"{chrId}.anibnd.dcx not found in the mod or the game chr folder."); return; }
-            if (IsCharacterLoaded(files)) return; // already the current document
+            if (IsCharacterLoaded(files) && !force) return; // already the current document
             try
             {
                 bool view = !files.AnibndFromMod;

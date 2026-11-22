@@ -170,8 +170,8 @@ namespace SoulsAiStudio.App
                             _ownJump = _editor.Active?.Editor.Cursor; // keep it until the cursor moves
                             _cacheKey = null;
                         }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Goal.Interrupt line {h.Line + 1}:\nif {h.Condition}" + (h.DependsOnDistance ? "\n[distance]: the arm also tests the distance to the target" : "") + "\nRight-click: set a label for this SpEffect");
-                        _app.SpEffectLabelContextMenu($"##sp_start_ctx{h.Line}", h.SpEffectId);
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Goal.Interrupt line {h.Line + 1}:\nif {h.Condition}" + (h.DependsOnDistance ? "\n[distance]: the arm also tests the distance to the target" : "") + "\nPick it, then right-click the box: go to its Goal.Interrupt branch, Lua scripts, label");
+                        _app.SpEffectLabelContextMenu($"##sp_start_ctx{h.Line}", h.SpEffectId); // the full menu can't be clicked inside an open dropdown
                     }
                 }
                 finally { ImGui.EndCombo(); }
@@ -213,8 +213,8 @@ namespace SoulsAiStudio.App
             if (_start != null)
             {
                 ImGui.TextColored(Theme.Accent, $"Goal.Interrupt > SpEffect {_app.SpEffectText(_start.SpEffectId)}");
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Right-click: set a label for this SpEffect");
-                _app.SpEffectLabelContextMenu("##sas_combo_hdr_ctx", _start.SpEffectId);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Right-click: go to its Goal.Interrupt branch, Lua scripts, label");
+                SpEffectMenu("##sas_combo_hdr_ctx", _start, null);
                 ImGui.SameLine();
                 ImGui.TextDisabled($"line {_start.Line + 1}");
             }
@@ -248,7 +248,7 @@ namespace SoulsAiStudio.App
             if (ImGui.Button("▶ Play combo") && path.Count > 0) Play(path);
             SameLineIfFits(ButtonWidth("Random path"));
             if (ImGui.Button("Random path")) { RollRandom(); Play(BuildPath(_nodes, 0)); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Plays the combo top-down like the game: the goal's random branches, then each anim's TAE SpEffects in\n" +
+            if (ImGui.IsItemHovered()) Theme.TooltipAboveMouse("Plays the combo top-down like the game: the goal's random branches, then each anim's TAE SpEffects in\n" +
                 "time order (before ComboAttack Queued). At each one Goal.Interrupt is rolled right there, with one\n" +
                 "interruptRand shared by its condition and the ifs inside; a miss lets the anim go on to the next one.\n" +
                 "Timers / SpEffect / HP checks and distance tests inside an arm count as 50/50.\n" +
@@ -511,7 +511,7 @@ namespace SoulsAiStudio.App
                     ImGui.SetTooltip(Esc(string.Join("\n", c.Select((x, i) => (x, w: warnings[i])).Where(t => t.w.Count > 0)
                         .Select(t => $"SpEffect {_app.SpEffectText(t.x.SpEffectId)}{KindTag(t.x)}:\n  " + string.Join("\n  ", t.w)))
                         + "\n\nHints, not errors: the analysis only knows the loaded TAE, params and this script."));
-                if (k >= 0 && k < c.Count) _app.SpEffectLabelContextMenu($"##sp_ctx{s.Line}_{depth}", c[k].SpEffectId);
+                if (k >= 0 && k < c.Count) SpEffectMenu($"##sp_ctx{s.Line}_{depth}", c[k].Handler, c[k]);
                 return;
             }
             try
@@ -537,11 +537,47 @@ namespace SoulsAiStudio.App
                         + (c[i].Blocked ? "\n[not observed]: Goal.Interrupt never sees it in game (no AddObserveSpecialEffectAttribute on the side\nit lands on), so Random path and Statistics never pick it. You can still pick it here to preview." : "")
                         + (c[i].Detail.Length > 0 ? "\nSource: " + c[i].Detail : "")
                         + (warnings[i].Count > 0 ? "\n\n(!) " + string.Join("\n(!) ", warnings[i]) + "\n(hints, not errors)" : "")
-                        + "\nRight-click: set a label for this SpEffect"));
-                    _app.SpEffectLabelContextMenu($"##c_ctx{i}", c[i].SpEffectId);
+                        + "\nPick it, then right-click the box: go to its Goal.Interrupt branch, add its observe, Lua scripts"));
+                    _app.SpEffectLabelContextMenu($"##c_ctx{i}", c[i].SpEffectId); // the full menu can't be clicked inside an open dropdown
                 }
             }
             finally { ImGui.EndCombo(); }
+        }
+
+        /// <summary>
+        /// Right-click menu of a SpEffect interrupt (Start from list, interrupt dropdowns, chosen interrupt line): jump to its
+        /// Goal.Interrupt branch in the active script, add the observe it lacks, list it in every script of the character
+        /// (as in the Parameters panel's "Lua" button), and the SpEffect label items.
+        /// </summary>
+        private void SpEffectMenu(string strId, SpEffectHandler h, InterruptCandidate? c)
+        {
+            if (!ImGui.BeginPopupContextItem(strId)) return;
+            try
+            {
+                int id = h.SpEffectId;
+                ImGui.TextDisabled($"SpEffect {_app.SpEffectText(id)}");
+                if (ImGui.MenuItem($"Go to Goal.Interrupt branch (line {h.Line + 1})"))
+                {
+                    _editor.JumpTo(h.Line);
+                    _app.Layout.FocusEditorTabFrames = 10;
+                }
+                if (_handlers != null && _editor.ActiveScript is { } script)
+                {
+                    var on = ComboDiagnostics.ObservedOn(_handlers, id);
+                    // Side it lands on: the target for on-hit SpEffects, the character itself otherwise (unknown: offer both).
+                    var need = c == null ? new[] { SpEffectHandlerWriter.TargetSelf, SpEffectHandlerWriter.TargetEnemy }
+                        : new[] { c.OnTarget ? SpEffectHandlerWriter.TargetEnemy : SpEffectHandlerWriter.TargetSelf };
+                    foreach (string target in need)
+                        if (!on.Contains(target) && (c == null ? on.Count == 0 : c.Blocked))
+                            if (ImGui.MenuItem($"Add observe on {target}"))
+                                _app.SpEffectLink.AddTo(script, id, target);
+                    if (on.Count > 0) ImGui.TextDisabled("Observed on " + string.Join(", ", on));
+                }
+                if (ImGui.MenuItem("In all Lua scripts of this character...")) _app.SpEffectLink.Request(id);
+                ImGui.Separator();
+                _app.SpEffectLabelMenuItems(id);
+            }
+            finally { ImGui.EndPopup(); }
         }
 
         /// <summary>Indent of a tree depth: 12 px per level, at most a third of the panel so deep combos stay readable.</summary>
@@ -623,7 +659,7 @@ namespace SoulsAiStudio.App
                                 ImGui.TextUnformatted($"SpEffect {_app.SpEffectText(ci.Handler.SpEffectId)} @ frame {ci.Frame:0} -> Goal.Interrupt (line {ci.Handler.Line + 1})" + (ComboSequence.ClearsOnPath(ci.Handler.Body, Arms(level + 1)) ? ", ClearSubGoal: replaces the rest of the combo" : ", no ClearSubGoal: queued after the rest"));
                                 ImGui.PopTextWrapPos();
                                 ImGui.PopStyleColor();
-                                _app.SpEffectLabelContextMenu($"##ci_ctx{s.Line}_{level}", ci.Handler.SpEffectId);
+                                SpEffectMenu($"##ci_ctx{s.Line}_{level}", ci.Handler, null);
                                 DrawTriggerFrame(s, level, ci);
                                 ImGui.Unindent(Ind(depth + 1));
                                 int? innerCut = null;

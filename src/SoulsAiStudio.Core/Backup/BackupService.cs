@@ -46,10 +46,29 @@ public sealed class BackupService(string backupDir, string rootDir)
                 .OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).ToList()
             : [];
 
+    /// <summary>
+    /// Deletes snapshots beyond <see cref="KeepSnapshots"/>. Best effort: a folder that cannot be deleted now (OneDrive
+    /// syncing it or keeping a file cloud-only, antivirus, an Explorer window, read-only files) is left for the next save.
+    /// A failed cleanup must never fail the save that triggered it.
+    /// </summary>
     private void Prune()
     {
-        foreach (string old in ListSnapshots().Skip(KeepSnapshots))
-            Directory.Delete(old, recursive: true);
+        IReadOnlyList<string> snapshots;
+        try { snapshots = ListSnapshots(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+        foreach (string old in snapshots.Skip(KeepSnapshots))
+        {
+            try
+            {
+                foreach (string f in Directory.EnumerateFiles(old, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(f, FileAttributes.Normal); // a read-only file blocks Directory.Delete
+                Directory.Delete(old, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Locked for now: retried at the next save.
+            }
+        }
     }
 
     private string Relative(string file)

@@ -34,7 +34,13 @@ namespace SoulsAiStudio.App
         // Analysis snapshot (built off the UI thread, debounced).
         public IReadOnlyList<GoalFunction> Outline = Array.Empty<GoalFunction>();
         public ILookup<int, AnimReference> AnimsByLine = Array.Empty<AnimReference>().ToLookup(a => a.Line);
-        public Task<(IReadOnlyList<GoalFunction> Outline, ILookup<int, AnimReference> Anims)>? OutlineTask;
+        public Task<(IReadOnlyList<GoalFunction> Outline, ILookup<int, AnimReference> Anims, bool Hot, SoulsAiStudio.Core.Lua.Syntax.LuaSyntaxError? Syntax, IReadOnlySet<int> SpEffects)>? OutlineTask;
+        /// <summary>The text has the in-game hot reload block (<see cref="HotReloadStub"/>).</summary>
+        public bool HotReload;
+        /// <summary>First Lua syntax error of the text (null = compiles), from the debounced analysis.</summary>
+        public SoulsAiStudio.Core.Lua.Syntax.LuaSyntaxError? SyntaxError;
+        /// <summary>SpEffect ids the script handles in Goal.Interrupt or observes (hover tooltips).</summary>
+        public IReadOnlySet<int> SpEffectIds = new HashSet<int>();
         public long OutlineVersion = -1;
         public DateTime LastEdit = DateTime.MinValue;
         /// <summary>Run once on the UI thread right after the text is loaded (e.g. the Lua part of an animation swap).</summary>
@@ -101,6 +107,8 @@ namespace SoulsAiStudio.App
             if (existing == null)
             {
                 existing = new OpenScript(script, _keys, _completions) { Loading = _app.Session!.OpenAsync(script) };
+                var created = existing;
+                existing.Editor.NumberHoverText = (n, line) => SpEffectHoverText(created, n, line);
                 _open.Add(existing);
             }
             if (afterLoad != null)
@@ -180,6 +188,23 @@ namespace SoulsAiStudio.App
             o.Saving = _app.Session!.SaveAsync(o.Doc, o.SavingText);
         }
 
+        /// <summary>
+        /// Hovering a number in the editor: the SpEffect's label (Souls AI &gt; SpEffect Labels) or its SpEffectParam name,
+        /// when the number is a SpEffect here: in a <c>...SpecialEffect...</c> call on that line, or an id the script
+        /// handles in Goal.Interrupt / observes. Other numbers (anim ids, distances...) show nothing.
+        /// </summary>
+        private string? SpEffectHoverText(OpenScript o, long n, string line)
+        {
+            if (n <= 0 || n > int.MaxValue) return null;
+            int id = (int)n;
+            bool spContext = line.Contains("SpecialEffect", StringComparison.Ordinal) || o.SpEffectIds.Contains(id);
+            if (!spContext) return null;
+            string? name = _app.SpEffectDisplayName(id);
+            return name != null
+                ? $"SpEffect {id}: {name}"
+                : $"SpEffect {id} (no label: right-click it in the Combo panel, or Souls AI > SpEffect Labels)";
+        }
+
         /// <returns>True when the panel (or the editor inside it) has keyboard focus.</returns>
         public bool Build()
         {
@@ -255,7 +280,8 @@ namespace SoulsAiStudio.App
             BuildStatusLine(o);
             o.Editor.SetHighlightLine(o.GoalAtCursor?.Line);
             if (DebugEditor) ImGui.TextColored(Theme.Warn, o.Editor.DebugState.Replace('\n', ' '));
-            bool focused = o.Editor.Render("##sas_code", new Vector2(-1, -1));
+            // Per-file ID: one shared child window would share its scroll position across every open tab.
+            bool focused = o.Editor.Render("##sas_code_" + o.Script.Key, new Vector2(-1, -1));
             if (o.Editor.TryTakeFindInFilesRequest(out string seed)) _app.OpenFindInScripts(seed); // Ctrl+Shift+F
             return focused;
         }
@@ -274,10 +300,10 @@ namespace SoulsAiStudio.App
                 {
                 if (ImGui.IsWindowAppearing()) { _navFilter = ""; ImGui.SetKeyboardFocusHere(); }
                 ImGui.SetNextItemWidth(-1);
-                ImGui.InputTextWithHint("##sas_nav_filter", "Filter goals (e.g. keng)", ref _navFilter, 64);
+                ImGui.InputTextWithHint("##sas_nav_filter", "Filter goals (e.g. ken09, k9, act1)", ref _navFilter, 64);
                 foreach (var group in o.Outline.GroupBy(g => g.Group).OrderBy(g => g.Key))
                 {
-                    var items = group.Where(g => _navFilter.Length == 0 || g.Name.Contains(_navFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var items = group.Where(g => GoalFilter.Matches(g.Name, _navFilter)).ToList();
                     if (items.Count == 0) continue;
                     ImGui.TextColored(Theme.GroupHeader, group.Key.ToString());
                     foreach (var g in items)
@@ -330,6 +356,8 @@ namespace SoulsAiStudio.App
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip((string.Join("\n", DirtyScriptNames.Select(n => "● " + n)) +
                     "\n\nSaves every modified script tab into the mod folder (backup taken).").Replace("%", "%%"));
             }
+            BuildHotReloadButton(o); // LuaEditorPanel.HotReload.cs
+            BuildSyntaxErrorButton(o); // LuaEditorPanel.Syntax.cs
             ImGui.SameLine();
             ImGui.TextDisabled(o.Doc!.WasBytecode ? "  (decompiled from bytecode — saving writes plain text)" : "");
         }
@@ -370,7 +398,9 @@ namespace SoulsAiStudio.App
                     // Only clean if nothing was typed while saving.
                     if (o.Editor.Version == o.SavingVersion) o.Editor.MarkClean();
                     if (save.Result.Warning != null) _app.ReportError($"{o.Script.FileName}: partial save", new Exception(save.Result.Warning));
-                    else _app.Notify($"Saved {o.Script.FileName} → {save.Result.WrittenFiles.Count} file(s) in the mod folder (backup taken).");
+                    else _app.Notify($"Saved {o.Script.FileName} → {save.Result.WrittenFiles.Count} file(s) in the mod folder (backup taken)."
+                                     + HotReloadSavedHint(o.SavingText)); // LuaEditorPanel.HotReload.cs
+                    WarnIfSavedWithSyntaxError(o, o.SavingText); // LuaEditorPanel.Syntax.cs
                 }
                 else _app.ReportError($"Saving {o.Script.FileName} failed", save.Exception?.GetBaseException());
             }
@@ -378,7 +408,12 @@ namespace SoulsAiStudio.App
             if (o.OutlineTask is { IsCompleted: true } ot)
             {
                 o.OutlineTask = null;
-                if (ot.IsCompletedSuccessfully) { o.Outline = ot.Result.Outline; o.AnimsByLine = ot.Result.Anims; }
+                if (ot.IsCompletedSuccessfully)
+                {
+                    o.Outline = ot.Result.Outline; o.AnimsByLine = ot.Result.Anims; o.HotReload = ot.Result.Hot;
+                    ApplySyntaxError(o, ot.Result.Syntax); // LuaEditorPanel.Syntax.cs
+                    o.SpEffectIds = ot.Result.SpEffects;
+                }
             }
             else if (o.OutlineTask == null && o.Doc != null && o.OutlineVersion != o.Editor.Version
                      && DateTime.UtcNow - o.LastEdit >= AnalysisDebounce)
@@ -390,7 +425,11 @@ namespace SoulsAiStudio.App
                 {
                     _completions.SetDocument(key, LuaCompletionScanner.Scan(snapshot)); // thread-safe
                     var tokens = SoulsAiStudio.Core.Lua.Syntax.LuaLexer.Tokenize(snapshot);
-                    return (GoalOutline.Build(snapshot, tokens), AnimReferences.Build(snapshot, tokens).ToLookup(a => a.Line));
+                    var outline = GoalOutline.Build(snapshot, tokens);
+                    var sp = SpEffectInterrupts.Build(snapshot, tokens, outline);
+                    IReadOnlySet<int> spIds = sp.Handlers.Keys.Concat(sp.ObservedTargets.Keys).ToHashSet();
+                    return (outline, AnimReferences.Build(snapshot, tokens).ToLookup(a => a.Line), HotReloadStub.Has(snapshot),
+                            SoulsAiStudio.Core.Lua.Syntax.LuaSyntaxChecker.Check(snapshot), spIds);
                 });
             }
         }

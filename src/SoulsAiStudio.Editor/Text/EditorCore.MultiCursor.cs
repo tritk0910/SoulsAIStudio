@@ -26,7 +26,7 @@ internal struct Caret
 /// <item>Typing, Backspace/Delete (incl. word), Enter, Tab (no multi-line selection), paste, cut/copy and caret movement
 /// apply to every caret; each multi-caret edit is ONE undo step that also restores all carets.</item>
 /// <item>Overlapping selections (or carets at the same place) are merged after every change.</item>
-/// <item>Line commands (move/copy/delete lines, comment, indent, Ctrl+Enter, Ctrl+L) work on the primary selection only
+/// <item>Ctrl+/ (comment) toggles the lines of every caret. Other line commands (move/copy/delete lines, indent, Ctrl+Enter, Ctrl+L) work on the primary selection only
 /// and drop the secondary carets (they can be brought back with undo).</item>
 /// <item><see cref="EditorCore.Select"/> / <see cref="EditorCore.SetCursor"/> (clicks, find, go to line) drop them too.</item>
 /// </list>

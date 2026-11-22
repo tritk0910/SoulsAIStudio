@@ -152,7 +152,7 @@ TAE event (InvokeAttackBehavior / Bullet / SpEffect) ──behaviorJudgeId──
 6. **Tự reload trong app (file watcher)**
    - Theo dõi file Lua trong project, luabnd/anibnd/chrbnd trong mod folder và gameparam. File đổi từ ngoài (VSCode, Smithbox, DSAS, …) → tự reload; nếu buffer đang có thay đổi chưa save thì hiện banner chọn *Giữ của tôi / Lấy bản mới / Xem diff*, không tự ghi đè.
    - Sau mỗi save: phân tích lại AST, combo graph, diagnostics, param resolve ngay (không cần mở lại project).
-   - In-game hot reload: **tạm bỏ** (xem mục 12).
+   - In-game hot reload: đã làm, xem mục 12.
 
 ### P1 — Hiểu AI bằng hình ảnh
 7. **Viewport 3D** (kế thừa ý tưởng DSAS): load model + skeleton + animation, play/scrub timeline.
@@ -406,7 +406,7 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 - Codebase: **fork DSAS**.
 - Lua decompiler: **DSLuaDecompiler** tại `C:\Users\erizo\Downloads\modding\DSLuaDecompiler` (gọi qua exe).
 - Combo phải xử lý **rẽ nhánh theo SpEffect trong TAE + interrupt handler Lua**, không chỉ combo thẳng.
-- Có **project system**, **backup**, **file watcher** (tự reload trong app). In-game hot reload **tạm bỏ**.
+- Có **project system**, **backup**, **file watcher** (tự reload trong app). In-game hot reload: có (mục 12).
 - Lua trong luabnd Sekiro: **plain text chạy được**, luabnd theo map, unpack bằng WitchyBND (đã xác minh).
 - SpEffect interrupt API: `GetSpecialEffectActivateInterruptType(0)` + `IsInterupt(INTERUPT_ActivateSpecialEffect)`; observe bằng `ai:AddObserveSpecialEffectAttribute` trong `Goal.Activate` (đã xác minh).
 
@@ -455,4 +455,4 @@ dotnet test tests/SoulsAiStudio.Core.Tests
 8. ComboGraph phân tích (Core, có test trên script Sekiro thật: Kengeki03 + SpEffect 5060040 cho nguồn TAE; Owl (Father) đòn đạp → SpEffect qua AtkParam cho nguồn OnHit) → graph view → combo timeline → combo builder (P2).
 
 ## 12. Tạm hoãn (không làm cho tới khi được yêu cầu)
-- **In-game Lua hot reload.** Ghi lại để sau này dùng: HavokScript của Sekiro có `loadfile`; cộng đồng (credit f_wang) đã reload `Goal.*` khi đang đánh bằng cách đặt `loadfile(<.lua tuyệt đối>)()` đầu `Goal.Interrupt`, kích hoạt khi player crouch (`HasSpecialEffectId(TARGET_ENE_0, 109200)`). Ý tưởng nếu làm lại: stub có marker do app chèn/gỡ, kích hoạt bằng version file app tăng mỗi lần save, chỉ có ở bản Dev, gỡ sạch khi Export.
+- ~~**In-game Lua hot reload.**~~ **Đã làm (2026-11-18)**: `Core/Lua/Analysis/HotReloadStub.cs` (block có marker đầu `Goal.Parry` + `Goal.ShootReaction` (AI = tham số đầu), chạy mỗi lần hàm được gọi (đã bỏ trigger crouch theo yêu cầu), chỉ reload khi file `.version` đổi) + `ProjectSession` ghi bản copy vào `<mod>\script\sas_hotreload\<luabnd>\` mỗi lần Save (xóa khi save không còn block) + nút "Hot Reload" ở status line Lua editor (`LuaEditorPanel.HotReload.cs`). Chưa test in-game. Ghi chú gốc:  để sau này dùng: HavokScript của Sekiro có `loadfile`; cộng đồng (credit f_wang) đã reload `Goal.*` khi đang đánh bằng cách đặt `loadfile(<.lua tuyệt đối>)()` đầu `Goal.Interrupt`, kích hoạt khi player crouch (`HasSpecialEffectId(TARGET_ENE_0, 109200)`). Ý tưởng nếu làm lại: stub có marker do app chèn/gỡ, kích hoạt bằng version file app tăng mỗi lần save, chỉ có ở bản Dev, gỡ sạch khi Export.

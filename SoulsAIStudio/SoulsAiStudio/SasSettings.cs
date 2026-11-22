@@ -58,6 +58,12 @@ namespace SoulsAiStudio.App
         public Dictionary<string, float>? ViewportLighting { get; set; }
 
         /// <summary>TAE graph: while scrubbing the time cursor, scroll so the playhead stays centered (see <see cref="ScrubFollow"/>).</summary>
+        /// <summary>TAE graph: block text runs past short blocks up to the next block on the row (DSAS 4.9.9). Action Graph menu.</summary>
+        public bool GraphTextOverflow { get; set; } = true;
+        /// <summary>TAE graph row height in pixels (DSAS: 16). Ctrl+Shift+wheel over the graph; block and row texts scale with it.</summary>
+        public float GraphRowHeight { get; set; } = 16f;
+        /// <summary>While actions are selected in the TAE graph, the other blocks and the background are darkened.</summary>
+        public bool GraphDimUnselected { get; set; } = true;
         public bool CenterPlayheadWhileScrubbing { get; set; } = false; // renamed from FollowPlayheadWhileScrubbing so the new default (off, DSAS 4.9.9 drag) applies
         /// <summary>
         /// TAE graph: use DSAS 5.0's "Relative Timeline Scrub" (mouse is warped onto the playhead, the graph re-centers on it

@@ -132,6 +132,8 @@ namespace SoulsAiStudio.App
                         : $"{files.AnibndPath}\n{files.ChrbndPath ?? "(no chrbnd: no model)"}\nClick: load model & animations. Right-click: rename / remove.");
                 if (ImGui.BeginPopupContextItem($"##sas_chr_ctx_{c.ChrId}"))
                 {
+                    if (ImGui.MenuItem("Reload from disk (model, animations, TAE)", "", false, files != null)) _app.LoadCharacterId(c.ChrId, force: true);
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opens the anibnd again and reads its TAE from the file itself (changes made by other tools show up).\nAnimation names are kept. Unsaved TAE changes: you are asked first.");
                     if (ImGui.MenuItem("Rename...")) { _renameChr = c.ChrId; _renameText = c.DisplayName; _renameFocused = false; _renameStartFrame = ImGui.GetFrameCount(); }
                     if (ImGui.MenuItem("Remove from project")) remove = c.ChrId;
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only removes it from this list. No file is deleted.");
@@ -278,14 +280,14 @@ namespace SoulsAiStudio.App
             if (o?.Doc == null) { ImGui.TextDisabled("(no script open)"); return; }
 
             ImGui.SetNextItemWidth(-1);
-            ImGui.InputTextWithHint("##sas_outline_filter", "Filter goals", ref _filter, 64);
+            ImGui.InputTextWithHint("##sas_outline_filter", "Filter goals (e.g. ken09)", ref _filter, 64);
             ImGui.BeginChild("##sas_outline", Vector2.Zero, false);
             try
             {
             var current = o.GoalAtCursor;
             foreach (var group in o.Outline.GroupBy(g => g.Group).OrderBy(g => g.Key))
             {
-                var items = group.Where(g => _filter.Length == 0 || g.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
+                var items = group.Where(g => GoalFilter.Matches(g.Name, _filter)).ToList();
                 if (items.Count == 0) continue;
                 ImGui.SetNextItemOpen(group.Key != GoalGroup.Act || _filter.Length > 0, ImGuiCond.Appearing);
                 ImGui.PushStyleColor(ImGuiCol.Text, Theme.GroupHeader);

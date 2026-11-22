@@ -793,7 +793,54 @@ public sealed class LuaCodeEditor
         ImGui.SetCursorScreenPos(origin);
         ImGui.Dummy(new Vector2(_view.TextStartX(m) + _maxLineWidth + 4 * lineH, _core.Buffer.LineCount * lineH + visible.Y * 0.5f));
 
-        DrawDiagnosticTooltip(in f);
+        if (!DrawDiagnosticTooltip(in f))
+            DrawNumberHoverTooltip(in f);
+    }
+
+    /// <summary>
+    /// Hover tooltip for an integer literal: (number, text of its line) → text to show, or null for none. E.g. the
+    /// app shows the label of a SpEffect id. Called only while the mouse rests on a number.
+    /// </summary>
+    public Func<long, string, string?>? NumberHoverText { get; set; }
+
+    void DrawNumberHoverTooltip(in FrameParams f)
+    {
+        if (NumberHoverText == null || !ImGui.IsWindowHovered() || ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            return;
+        var mouse = ImGui.GetMousePos();
+        if (mouse.X < f.WindowPos.X + _view.GutterWidth(_metrics))
+            return;
+        var pos = _view.ScreenToCoordinates(mouse, in f, _metrics);
+        if (pos.Line < 0 || pos.Line >= _core.Buffer.LineCount)
+            return;
+        float lineTop = f.ContentOrigin.Y + pos.Line * _metrics.LineHeight;
+        if (mouse.Y < lineTop || mouse.Y > lineTop + _metrics.LineHeight)
+            return;
+        var line = _core.Buffer.GetLineSpan(pos.Line);
+        int c = Math.Min(pos.Column, line.Length - 1);
+        if (c < 0)
+            return;
+        // ScreenToCoordinates rounds to the nearest caret position: the char under the mouse is at c or c - 1.
+        if (!char.IsAsciiDigit(line[c]) && c > 0 && char.IsAsciiDigit(line[c - 1]))
+            c--;
+        if (!char.IsAsciiDigit(line[c]))
+            return;
+        int a = c, b = c + 1;
+        while (a > 0 && char.IsAsciiDigit(line[a - 1])) a--;
+        while (b < line.Length && char.IsAsciiDigit(line[b])) b++;
+        // Part of a name (f2_local6), a decimal (1.5) or a hex literal: not an id.
+        if (a > 0 && (char.IsAsciiLetter(line[a - 1]) || line[a - 1] is '_' or '.'))
+            return;
+        if (b < line.Length && (char.IsAsciiLetter(line[b]) || line[b] is '_' or '.'))
+            return;
+        if (b - a > 18 || !long.TryParse(line[a..b], out long n))
+            return;
+        string? text = NumberHoverText(n, line.ToString());
+        if (string.IsNullOrEmpty(text))
+            return;
+        ImGui.BeginTooltip();
+        _sink.TextUnformatted(text);
+        ImGui.EndTooltip();
     }
 
     float ComputeMaxLineWidth(IGlyphMetrics m)
@@ -835,20 +882,21 @@ public sealed class LuaCodeEditor
             ImGui.SetScrollX(x - visible.X + margin);
     }
 
-    void DrawDiagnosticTooltip(in FrameParams f)
+    /// <returns>True when a diagnostic tooltip was shown.</returns>
+    bool DrawDiagnosticTooltip(in FrameParams f)
     {
         if (_diagnostics.Count == 0 || !ImGui.IsWindowHovered())
-            return;
+            return false;
         var mouse = ImGui.GetMousePos();
         var pos = _view.ScreenToCoordinates(mouse, in f, _metrics);
         float lineTop = f.ContentOrigin.Y + pos.Line * _metrics.LineHeight;
         if (mouse.Y < lineTop || mouse.Y > lineTop + _metrics.LineHeight)
-            return;
+            return false;
 
         bool inGutter = mouse.X < f.WindowPos.X + _view.GutterWidth(_metrics);
         int d = _view.DiagnosticAt(pos, anyOnLine: inGutter);
         if (d < 0)
-            return;
+            return false;
 
         ImGui.BeginTooltip();
         if (inGutter)
@@ -861,6 +909,7 @@ public sealed class LuaCodeEditor
             TooltipLine(_diagnostics[d]);
         }
         ImGui.EndTooltip();
+        return true;
     }
 
     void TooltipLine(Diagnostic diag)

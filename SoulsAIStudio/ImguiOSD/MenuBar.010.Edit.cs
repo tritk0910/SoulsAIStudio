@@ -94,7 +94,7 @@ namespace DSAnimStudio.ImguiOSD
                 if (ClickItem("Change Type of Selected Action", Tae.IsFileOpen && Tae.SingleEventBoxSelected && Tae.SelectedAnim?.IS_DUMMY_ANIM == false, "F1"))
                     Tae.ChangeTypeOfEvent(Tae.InspectorAction);
 
-                if (ClickItem("Edit Current Animation Name...", Tae.IsFileOpen && Tae.SelectedAnim?.IS_DUMMY_ANIM == false, "F2"))
+                if (ClickItem("Rename Current Animation (Anim File Name)...", Tae.IsFileOpen && Tae.SelectedAnim?.IS_DUMMY_ANIM == false, "F2"))
                     Tae.ShowDialogChangeAnimName(Tae.Proj, Tae.SelectedAnimCategory, Tae.SelectedAnim);
 
                 if (ClickItem("Edit Current Animation Category Name...", Tae.IsFileOpen, "Shift+F2"))

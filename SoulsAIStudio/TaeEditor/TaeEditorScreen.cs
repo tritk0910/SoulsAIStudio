@@ -2523,6 +2523,7 @@ namespace DSAnimStudio.TaeEditor
                                 ref_event.Type = ref_eventType;
                                 ref_event.Template = ref_eventTemplate;
                                 ref_event.ParameterBytes = ref_eventParams.ToArray();
+                                if (ref_event.Template != null) ref_event.NewLoadParamsFromBytes(lenientOnAssert: true); // [SAS] Parameters still had the new type's layout after undo (red error)
                                 ref_event.RequestUpdateText();
 
                                 SelectedAnim.SAFE_SetIsModified(!IsReadOnlyFileMode);
@@ -2902,6 +2903,7 @@ namespace DSAnimStudio.TaeEditor
 
         public void ShowDialogChangeAnimName(DSAProj proj, DSAProj.AnimCategory tae, DSAProj.Animation anim)
         {
+            if (SoulsAiStudio.App.SasHooks.RenameAnimFileName(this, proj, anim)) return; // [SAS] F2 renames the Anim File Name (no custom display name)
             if (anim != null && !anim.IS_DUMMY_ANIM)
             {
 

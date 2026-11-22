@@ -531,7 +531,7 @@ namespace DSAnimStudio.TaeEditor
 
                     Proj = new DSAProj(parentDocument);
                     
-                    if (File.Exists(dsaprojName))
+                    if (File.Exists(dsaprojName) && !SoulsAiStudio.App.SasHooks.ReadTaeFromAnibndInstead(dsaprojName)) // [SAS] Reload: TAE from the anibnd, not the cached .dsaproj
                     {
                         Proj = new DSAProj(parentDocument);
                         //Proj.DeserializeFromFile(dsaprojName);
@@ -570,6 +570,7 @@ namespace DSAnimStudio.TaeEditor
                     else
                     {
                         Proj = DSAProj.CreateFromContainer(Info, template, parentDocument, checkValidity: false);
+                        SoulsAiStudio.App.SasHooks.AfterTaeFromAnibnd(Proj, dsaprojName, template, parentDocument); // [SAS] keep the anim names kept in the .dsaproj
                     }
 
 

@@ -1162,7 +1162,8 @@ namespace DSAnimStudio.TaeEditor
             bool failed = false;
             try
             {
-                clipboardContents.DeserializeFromBytesString(clipboardText, dcx: false, Graph.MainScreen.FileContainer.Proj);
+                if (!SoulsAiStudio.App.SasHooks.PasteLegacyClipboard(clipboardText, Graph.MainScreen.FileContainer.Proj, clipboardContents)) // [SAS] also accepts DSAS 4.9's JSON clipboard
+                    clipboardContents.DeserializeFromBytesString(clipboardText, dcx: false, Graph.MainScreen.FileContainer.Proj);
             }
             catch
             {
@@ -1230,6 +1231,7 @@ namespace DSAnimStudio.TaeEditor
                     Graph.AnimRef.SAFE_AddAction(act);
                     Graph.MainScreen.NewSelectedActions.Add(act);
                 }
+                SoulsAiStudio.App.SasHooks.AfterPasteActions(Graph.AnimRef, Graph.MainScreen.FileContainer.Proj); // [SAS] name the new rows (were "%null% (Row N)"), drop empty rows
             }, () => { }, "Paste event(s)");
             Graph.AnimRef.SAFE_SetIsModified(true);
         }

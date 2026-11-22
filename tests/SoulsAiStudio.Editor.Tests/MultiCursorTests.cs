@@ -219,16 +219,19 @@ public class MultiCursorTests
     }
 
     [Fact]
-    public void LineCommands_And_Clicks_UsePrimaryOnly()
+    public void Comment_CoversEveryCaret_ClicksUsePrimaryOnly()
     {
         var (e, k, _) = Setup("a\nb\nc");
         e.Core.SetCursor((0, 0));
         e.Core.AddCaret((2, 0)); // primary on line 2
         Step(e, k.Frame(ctrl: true, keys: EditorKey.Slash));
-        Assert.Equal("a\nb\n-- c", e.Text);
-        Assert.Equal(1, e.CaretCount);
+        Assert.Equal("-- a\nb\n-- c", e.Text); // Ctrl+/ comments the line of every caret (Ctrl+D)
+        Assert.Equal(2, e.CaretCount);
+        Step(e, k.Frame(ctrl: true, keys: EditorKey.Slash));
+        Assert.Equal("a\nb\nc", e.Text);
         e.Undo();
-        Assert.Equal(2, e.CaretCount); // undo brings the carets back
+        Assert.Equal("-- a\nb\n-- c", e.Text);
+        Assert.Equal(2, e.CaretCount);
         e.Core.SetCursor((1, 0));
         Assert.Equal(1, e.CaretCount);
     }

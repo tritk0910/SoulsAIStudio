@@ -250,8 +250,12 @@ internal sealed partial class EditorCore
 
     // ---------------------------------------------------------------- edits
 
-    /// <summary>Replaces [a, b) with <paramref name="text"/> as one undo step. Cursor goes to the end of the inserted text.</summary>
-    public bool ReplaceRange(Coordinates a, Coordinates b, string text, bool isTyping = false, SelectionState? after = null)
+    /// <summary>
+    /// Replaces [a, b) with <paramref name="text"/> as one undo step. Cursor goes to the end of the inserted text.
+    /// Secondary carets are dropped, unless <paramref name="afterExtras"/> gives where they are after the edit.
+    /// </summary>
+    public bool ReplaceRange(Coordinates a, Coordinates b, string text, bool isTyping = false, SelectionState? after = null,
+        SelectionState[]? afterExtras = null)
     {
         if (ReadOnly)
             return false;
@@ -282,6 +286,11 @@ internal sealed partial class EditorCore
         _anchor = Buffer.Sanitize(rec.After.Anchor);
         _cursor = Buffer.Sanitize(rec.After.Cursor);
         _preferredColumn = -1;
+        if (afterExtras != null)
+        {
+            rec.AfterExtras = afterExtras;
+            RestoreExtras(afterExtras);
+        }
         ScrollToCursorRequested = true;
         Undo.Push(rec);
         return true;

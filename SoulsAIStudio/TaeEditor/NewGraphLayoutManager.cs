@@ -172,6 +172,7 @@ namespace DSAnimStudio.TaeEditor
         
         public void Update(float elapsedTime)
         {
+            RowHeight = SoulsAiStudio.App.SasHooks.GraphRowHeight; // [SAS] vertical zoom (Ctrl+Shift+wheel)
             Graph.ScrollViewer.SetDisplayRect(Graph.WholeScrollViewerRect, GetVirtualAreaSize());
             UpdateScrollToRect(elapsedTime);
             
@@ -192,6 +193,7 @@ namespace DSAnimStudio.TaeEditor
 
             if (Graph.MainScreen.Input.CtrlHeld)
             {
+                if (!SoulsAiStudio.App.SasHooks.GraphRowZoomWheel(Graph.MainScreen.Input.ShiftHeld, Graph.MainScreen.Input.ScrollDelta)) // [SAS] Ctrl+Shift+wheel: row height (vertical zoom)
                 Graph.InputMan.ZoomDelta(Graph.MainScreen.Input.ScrollDelta, Graph.MainScreen.Input.MousePosition.X - Graph.WholeScrollViewerRect.X);
             }
         }

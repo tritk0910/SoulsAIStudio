@@ -60,6 +60,9 @@ namespace SoulsAiStudio.App
                 ? doc : null;
             bool discard = DiscardChangesOnNextReload;
             DiscardChangesOnNextReload = false;
+            // A reload reads the TAE from the anibnd itself: DSAS would otherwise take it from the .dsaproj it keeps next to
+            // the anibnd (its own copy), so changes made to the anibnd by other tools (DSAS 4.9...) never showed up.
+            ReadTaeFromAnibndFor = old != null ? Path.GetFullPath(files.AnibndPath) : null;
 
             var container = new DSAProj.TaeContainerInfo.ContainerAnibnd(files.AnibndPath, files.ChrbndPath ?? "");
             zzz_DocumentManager.RequestFileOpenRecent = true;
@@ -77,6 +80,41 @@ namespace SoulsAiStudio.App
 
         /// <summary>Set before a reload the user confirmed: the old document's unsaved TAE changes are dropped without asking again.</summary>
         public bool DiscardChangesOnNextReload { get; set; }
+
+        /// <summary>Full path of the anibnd whose next open (a reload) reads the TAE from the anibnd, not from its .dsaproj.</summary>
+        public string? ReadTaeFromAnibndFor { get; set; }
+
+        /// <summary>DSAS is opening <paramref name="dsaprojPath"/>'s anibnd: true = build the TAE from the anibnd (see <see cref="ReadTaeFromAnibndFor"/>).</summary>
+        public bool ShouldReadTaeFromAnibnd(string dsaprojPath) =>
+            ReadTaeFromAnibndFor != null
+            && string.Equals(Path.GetFullPath(dsaprojPath), ReadTaeFromAnibndFor + DSAProj.EXT, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// After DSAS built the TAE from the anibnd on a reload: copies the animation names (e.g. "slash up") from the old
+        /// .dsaproj, since the anibnd has no names. Clears the reload request.
+        /// </summary>
+        public void AfterTaeFromAnibnd(DSAProj proj, string dsaprojPath, SoulsAssetPipeline.Animation.TAE.Template template, zzz_DocumentIns doc)
+        {
+            if (!ShouldReadTaeFromAnibnd(dsaprojPath)) return;
+            ReadTaeFromAnibndFor = null;
+            if (!File.Exists(dsaprojPath)) return;
+            var old = new DSAProj(doc);
+            old.SAFE_DeserializeFromFile(dsaprojPath, template);
+            int named = 0;
+            foreach (var category in proj.SAFE_GetAllAnimCategories())
+                category.SafeAccessAnimations(list =>
+                {
+                    foreach (var anim in list)
+                    {
+                        var prev = old.SAFE_GetFirstAnimationFromFullID(anim.SplitID);
+                        string? name = prev?.Info?.DisplayName;
+                        if (!string.IsNullOrEmpty(name) && name != anim.Info.DisplayName) { anim.Info.DisplayName = name; named++; }
+                    }
+                });
+            zzz_NotificationManagerIns.PushNotification($"Reloaded the TAE from {Path.GetFileName(ReadTaeFromAnibndForName(dsaprojPath))} (animation names kept: {named}).");
+        }
+
+        private static string ReadTaeFromAnibndForName(string dsaprojPath) => dsaprojPath[..^DSAProj.EXT.Length];
 
         private static readonly System.Reflection.FieldInfo? DocumentsField =
             typeof(zzz_DocumentManager).GetField("Documents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);

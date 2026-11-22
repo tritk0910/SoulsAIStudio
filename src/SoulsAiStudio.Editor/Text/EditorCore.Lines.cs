@@ -4,7 +4,7 @@ namespace SoulsAiStudio.Editor.Text;
 /// VSCode-style line commands: move / copy lines (Alt+Up/Down, Shift+Alt+Up/Down), delete lines (Ctrl+Shift+K),
 /// select line (Ctrl+L), insert line below/above (Ctrl+Enter / Ctrl+Shift+Enter), toggle <c>--</c> comment (Ctrl+/),
 /// select word / add next occurrence (Ctrl+D). Each command is one undo step. Line commands act on the primary
-/// selection only and drop secondary carets (see EditorCore.MultiCursor).
+/// selection only and drop secondary carets (see EditorCore.MultiCursor), except the comment toggle, which covers every caret.
 /// </summary>
 internal sealed partial class EditorCore
 {
@@ -136,41 +136,61 @@ internal sealed partial class EditorCore
     }
 
     /// <summary>
-    /// Ctrl+/: comments the selected lines with <c>-- </c> at their common indentation, or uncomments them when every
-    /// non-blank one already starts with <c>--</c>. Blank lines are left alone.
+    /// Ctrl+/: comments the lines of every caret / selection (multi-cursor from Ctrl+D, Alt+Click... included) with
+    /// <c>-- </c> at the common indentation of each selection, or uncomments them when every non-blank one already
+    /// starts with <c>--</c>. Blank lines are left alone. One undo step; all carets are kept.
     /// </summary>
     public bool ToggleLineComment()
     {
         if (ReadOnly)
             return false;
-        var (first, last) = SelectedLines();
-        int minIndent = int.MaxValue;
+        // Line -> indentation to comment it at (the smallest indent of the selection it belongs to).
+        var commentAt = new SortedDictionary<int, int>();
+        var carets = SortedCarets(out _);
+        foreach (var c in carets)
+        {
+            int first = c.Start.Line, last = c.End.Line;
+            if (last > first && c.End.Column == 0)
+                last--;
+            int minIndent = int.MaxValue;
+            for (int i = first; i <= last; i++)
+            {
+                var l = Buffer.GetLineSpan(i);
+                int ind = IndentOf(l);
+                if (ind < l.Length)
+                    minIndent = Math.Min(minIndent, ind);
+            }
+            if (minIndent == int.MaxValue)
+                continue;
+            for (int i = first; i <= last; i++)
+                commentAt[i] = commentAt.TryGetValue(i, out int prev) ? Math.Min(prev, minIndent) : minIndent;
+        }
         bool allCommented = true, any = false;
-        for (int i = first; i <= last; i++)
+        foreach (var (i, _) in commentAt)
         {
             var l = Buffer.GetLineSpan(i);
             int ind = IndentOf(l);
             if (ind == l.Length)
                 continue;
             any = true;
-            minIndent = Math.Min(minIndent, ind);
             if (!l[ind..].StartsWith("--"))
                 allCommented = false;
         }
         if (!any)
             return false;
 
-        int n = last - first + 1;
+        int firstLine = commentAt.Keys.First(), lastLine = commentAt.Keys.Last();
+        int n = lastLine - firstLine + 1;
         var cols = new int[n];
         var deltas = new int[n];
         var sb = new System.Text.StringBuilder();
-        for (int i = first; i <= last; i++)
+        for (int i = firstLine; i <= lastLine; i++)
         {
-            if (i > first)
+            if (i > firstLine)
                 sb.Append('\n');
             var l = Buffer.GetLineSpan(i);
             int ind = IndentOf(l);
-            if (ind == l.Length)
+            if (!commentAt.TryGetValue(i, out int at) || ind == l.Length)
             {
                 sb.Append(l);
                 continue;
@@ -179,27 +199,34 @@ internal sealed partial class EditorCore
             {
                 int remove = 2 + (ind + 2 < l.Length && l[ind + 2] == ' ' ? 1 : 0);
                 sb.Append(l[..ind]).Append(l[(ind + remove)..]);
-                cols[i - first] = ind;
-                deltas[i - first] = -remove;
+                cols[i - firstLine] = ind;
+                deltas[i - firstLine] = -remove;
             }
             else
             {
-                sb.Append(l[..minIndent]).Append("-- ").Append(l[minIndent..]);
-                cols[i - first] = minIndent;
-                deltas[i - first] = 3;
+                sb.Append(l[..at]).Append("-- ").Append(l[at..]);
+                cols[i - firstLine] = at;
+                deltas[i - firstLine] = 3;
             }
         }
         Coordinates Adjust(Coordinates p)
         {
-            if (p.Line < first || p.Line > last)
+            if (p.Line < firstLine || p.Line > lastLine)
                 return p;
-            int k = p.Line - first;
+            int k = p.Line - firstLine;
             if (deltas[k] == 0 || p.Column < cols[k])
                 return p;
             return new Coordinates(p.Line, Math.Max(cols[k], p.Column + deltas[k]));
         }
-        return ReplaceRange(new Coordinates(first, 0), new Coordinates(last, Buffer.GetLineLength(last)), sb.ToString(),
-            after: new SelectionState(Adjust(_anchor), Adjust(_cursor)));
+        SelectionState[]? extras = null;
+        if (_extras.Count > 0)
+        {
+            extras = new SelectionState[_extras.Count];
+            for (int i = 0; i < extras.Length; i++)
+                extras[i] = new SelectionState(Adjust(_extras[i].Anchor), Adjust(_extras[i].Cursor));
+        }
+        return ReplaceRange(new Coordinates(firstLine, 0), new Coordinates(lastLine, Buffer.GetLineLength(lastLine)), sb.ToString(),
+            after: new SelectionState(Adjust(_anchor), Adjust(_cursor)), afterExtras: extras);
     }
 
     /// <summary>

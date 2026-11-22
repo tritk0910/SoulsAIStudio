@@ -331,8 +331,9 @@ namespace DSAnimStudio.ImguiOSD
                                 }
                             }
 
-                            for (int pIndex = 0; pIndex < act.Parameters.Template.Count; pIndex++)
+                            for (int pIndexLoop = 0; pIndexLoop < act.Parameters.Template.Count; pIndexLoop++) // [SAS] see next line
                             {
+                                int pIndex = pIndexLoop; // [SAS] own copy per field: the undo/redo lambdas below captured the shared loop variable (Ctrl+Z → index out of range)
                                 if (pIndex >= act.Parameters.Values.Count)
                                     continue;
 

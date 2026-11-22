@@ -106,6 +106,35 @@ public class ProjectTests
     }
 
     [RequiresTestDataFact]
+    public async Task Session_SaveWithHotReloadBlock_WritesCopyAndNewVersion_RemovedOnSaveWithout()
+    {
+        var (work, game, mod) = MakeLayout();
+        using var _ = work;
+        var p = SasProject.Create(Path.Combine(work.Path, "proj", "Owl.sasproj"), "Owl", game, mod,
+            [new ProjectScript { Luabnd = "m10_00_00_00", EntryPath = @"out\bin\506300_battle.lua" }]);
+        var session = new ProjectSession(p, decompilerExe: "");
+        var doc = await session.OpenAsync(p.Scripts[0]);
+        var (copy, version) = session.HotReloadPaths(p.Scripts[0]);
+        Assert.StartsWith(Path.GetFullPath(mod), copy);
+
+        string withStub = SoulsAiStudio.Core.Lua.Analysis.HotReloadStub.Insert(doc.SavedText, copy, version, "G").Text;
+        var r1 = await session.SaveAsync(doc, withStub);
+        Assert.Null(r1.Warning);
+        Assert.Equal(withStub, File.ReadAllText(copy));
+        string v1 = File.ReadAllText(version);
+        Assert.StartsWith("return \"", v1);
+
+        await Task.Delay(20);
+        await session.SaveAsync(doc, withStub + "-- x\n");
+        Assert.NotEqual(v1, File.ReadAllText(version)); // every save = new version
+
+        await session.SaveAsync(doc, doc.SavedText);
+        Assert.False(File.Exists(copy));
+        Assert.False(File.Exists(version));
+        Assert.False(Directory.Exists(session.HotReloadDir));
+    }
+
+    [RequiresTestDataFact]
     public async Task Session_FirstSaveOfGameOnlyLuabnd_CreatesModCopy()
     {
         var (work, game, mod) = MakeLayout();

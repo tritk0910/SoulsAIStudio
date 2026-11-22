@@ -281,6 +281,7 @@ namespace DSAnimStudio.TaeEditor
                     }
 
 
+                    SoulsAiStudio.App.SasHooks.DimGraphBackground(Graph.MainScreen.NewSelectedActions, gd.Viewport.Width / Main.DPI, gd.Viewport.Height / Main.DPI); // [SAS] darker background while actions are selected
                     List<DSAProj.Action> actionsCopy = Graph.GetActionListCopy_UsesLock(useGhostIfAvailable: true);
 
                     //bool anyHoverEvent = false;
@@ -421,6 +422,7 @@ namespace DSAnimStudio.TaeEditor
                             color_line = color_line.MultBrightness(0.6f);
                             color_text = color_text.MultBrightness(0.6f);
                         }
+                        SoulsAiStudio.App.SasHooks.DimIfNotSelected(act, Graph.MainScreen.NewSelectedActions, Graph.MainScreen.InspectorAction, ref color_fill, ref color_line, ref color_text); // [SAS] selection stands out
 
                         if (Graph.MainScreen.HighlightOpacityDictCopy.ContainsKey(act))
                         {
@@ -536,7 +538,7 @@ namespace DSAnimStudio.TaeEditor
 
 
                         var eventRectOnscreenLeft = Math.Max(actRect.Left, scrollViewVisibleRect.Left);
-                        var eventRectOnscreenRight = Math.Min(actRect.Right, scrollViewVisibleRect.Right);
+                        var eventRectOnscreenRight = Math.Min(SoulsAiStudio.App.SasHooks.ActionTextRight(act, actRect.Right, actionsCopy, Layout.GetRowOfAction, Layout.SecondsPixelSize), scrollViewVisibleRect.Right); // [SAS] text may run past a short block up to the next block on its row (DSAS 4.9.9)
                         var eventRectOnscreenTop = Math.Max(actRect.Top, scrollViewVisibleRect.Top);
                         var eventRectOnscreenBottom = Math.Min(actRect.Bottom, scrollViewVisibleRect.Bottom);
 
@@ -550,7 +552,7 @@ namespace DSAnimStudio.TaeEditor
                             if (act.GraphDisplayText == null || act.NeedsTextRefresh || act.TooltipDisplayText == null)
                                 act.UpdateGraphDisplayText();
                             var eventText = act.GraphDisplayText ?? "";
-                            ImGuiDebugDrawer.DrawText(eventText, new Vector2(4 * Main.DPI, -1 + (0.4f * Main.DPI)).RoundInt(), color_text, color_text_shadow, fontSize: 15, includeCardinalShadows: true, shadowThickness: 1);
+                            ImGuiDebugDrawer.DrawText(eventText, new Vector2(4 * Main.DPI, -1 + (0.4f * Main.DPI)).RoundInt(), color_text, color_text_shadow, fontSize: SoulsAiStudio.App.SasHooks.GraphTextSize(15), includeCardinalShadows: true, shadowThickness: 1); // [SAS] text grows with the row height
                         }
                         gd.Viewport = oldViewport2;
                         
@@ -665,7 +667,7 @@ namespace DSAnimStudio.TaeEditor
                     for (int i = 0; i < actionTracksCopy.Count; i++)
                     {
                         ImGuiDebugDrawer.DrawText(actionTracksCopy[i].Info.DisplayName ?? $"%null% (Row {i + 1})", new Vector2(2, (i * Layout.RowHeight) - Graph.ScrollViewer.RoundedScroll.Y - 4), 
-                            Color.White, Color.Black);
+                            Color.White, Color.Black, fontSize: SoulsAiStudio.App.SasHooks.GraphTextSize(Main.ImGuiFontPixelSize)); // [SAS] row names grow with the row height
 
 
                     }
