@@ -25,7 +25,7 @@ namespace SoulsAiStudio.App
         public static volatile bool GraphHidden;
 
         public const string AppName = "Souls AI Studio";
-        public const string AppVersion = "0.4.0";
+        public const string AppVersion = "0.5.0";
 
         /// <summary>Window title (replaces "DS ANIM STUDIO x"); keeps the DSAS base version for credit/bug reports.</summary>
         public static string AppTitle(string dsasVersion) => $"{AppName} {AppVersion}";
@@ -310,6 +310,9 @@ namespace SoulsAiStudio.App
             try { graph.ScrollViewer.SetDisplayRect(graph.WholeScrollViewerRect, graph.LayoutManager.GetVirtualAreaSize()); }
             catch (Exception) { }
         }
+
+        /// <summary>One of our (floating) windows is under the mouse: DSAS must not treat the click as a viewport / graph click.</summary>
+        public static bool OurWindowHovered => App.Layout.OurWindowHovered;
 
         public static bool GraphTakesMouse =>!GraphHidden && !App.Layout.OurWindowHovered;
 

@@ -44,17 +44,26 @@ namespace SoulsAiStudio.App
         private List<string> _hkxProblems = new();
         private string? _hkxInfo;
 
+        // replace
+        private bool _selectReplace;
+        private string _repId = "";
+        private string _repPath = "";
+        private byte[]? _repBytes;
+        private List<string> _repProblems = new();
+        private string? _repInfo;
+
         private AnimSlotsBridge.Snapshot? _snap;
         private DateTime _snapTime;
 
         public AnimSlotsWindow(SasApp app) => _app = app;
 
-        /// <summary>Opens on the Swap tab with the selected anim as A (or on Add).</summary>
-        public void Open(bool add = false)
+        /// <summary>Opens on the Swap tab with the selected anim as A (or on Add / Replace).</summary>
+        public void Open(bool add = false, bool replace = false)
         {
             IsOpen = true;
             _focus = true;
             _selectAdd = add;
+            _selectReplace = replace;
             _snap = AnimSlotsBridge.Read();
             if (_snap != null && _snap.SelectedId >= 0)
             {
@@ -62,6 +71,7 @@ namespace SoulsAiStudio.App
                 if (string.IsNullOrEmpty(_newId)) _newId = AnimSlots.IdName(AnimSlots.NextFreeId(_snap.Entries, _snap.HkxIds, _snap.SelectedId));
                 if (string.IsNullOrEmpty(_overrideFrom)) _overrideFrom = AnimSlots.IdName(_snap.SelectedId);
             }
+            if (_snap != null && _snap.SelectedId >= 0) _repId = AnimSlots.IdName(_snap.SelectedId);
             _planKey = null;
         }
 
@@ -69,12 +79,13 @@ namespace SoulsAiStudio.App
         {
             if (!IsOpen) return false;
             ImGui.SetNextWindowSize(new Vector2(640, 520), ImGuiCond.FirstUseEver);
-            if (_focus) { ImGui.SetNextWindowFocus(); _focus = false; }
+            if (_focus) { ImGui.SetNextWindowFocus(); _focus = false; _flashStart = ImGui.GetTime(); }
             bool focused = false;
             bool visible = Theme.BeginOpaque(WindowName, ref IsOpen, ImGuiWindowFlags.NoCollapse);
             try
             {
                 if (!visible) return false;
+                DrawFlash();
                 focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
                 if (AnimSlotsBridge.WhyUnavailable(_app) is { } why) { ImGui.TextColored(Theme.Warn, why.Replace("%", "%%")); return focused; }
                 if (_snap == null || DateTime.UtcNow - _snapTime > TimeSpan.FromSeconds(1)) { _snap = AnimSlotsBridge.Read(); _snapTime = DateTime.UtcNow; }
@@ -84,12 +95,28 @@ namespace SoulsAiStudio.App
                 {
                     if (ImGui.BeginTabItem("Swap")) { DrawSwapHistory(); DrawSwap(); ImGui.EndTabItem(); }
                     if (BeginTab("Add", _selectAdd)) { DrawAdd(); ImGui.EndTabItem(); }
+                    if (BeginTab("Replace", _selectReplace)) { DrawReplace(); ImGui.EndTabItem(); }
                     _selectAdd = false;
+                    _selectReplace = false;
                     ImGui.EndTabBar();
                 }
             }
             finally { ImGui.End(); }
             return focused;
+        }
+
+        // Opening the window focuses it, which is easy to miss when it sits docked somewhere: blink a yellow border 3 times.
+        private double _flashStart = -100;
+        private const double FlashStep = 0.35, FlashLength = FlashStep * 6;
+
+        private void DrawFlash()
+        {
+            double t = ImGui.GetTime() - _flashStart;
+            if (t < 0 || t >= FlashLength || (int)(t / FlashStep) % 2 != 0) return;
+            var pos = ImGui.GetWindowPos();
+            var size = ImGui.GetWindowSize();
+            ImGui.GetForegroundDrawList().AddRect(pos + new Vector2(2, 2), pos + size - new Vector2(2, 2),
+                ImGui.GetColorU32(new Vector4(1f, 0.85f, 0.1f, 1f)), 0f, ImDrawFlags.None, 4f);
         }
 
         private static unsafe bool BeginTab(string label, bool select)
@@ -599,6 +626,90 @@ namespace SoulsAiStudio.App
                 _hkxInfo = $"{bytes.Length / 1024.0:0.#} KB" + (_hkxProblems.Count == 0 ? ", matches this character's skeleton" : "");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _hkxProblems.Add("Could not read the file: " + ex.Message); }
+        }
+
+        // ---------------------------------------------------------------- replace
+
+        private void DrawReplace()
+        {
+            ImGui.TextWrapped("Replace the motion of an existing animation with an external .hkx file. The TAE entry and its events stay as they are.");
+            ImGui.Spacing();
+            ImGui.TextDisabled("Animation to replace");
+            ImGui.SetNextItemWidth(150);
+            ImGui.InputTextWithHint("##rep_id", "a000_003001", ref _repId, 32);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Selected##rep") && _snap!.SelectedId >= 0) _repId = AnimSlots.IdName(_snap.SelectedId);
+            int? id = ParseId(_repId);
+            bool hasOwn = id is int i0 && _snap!.HkxIds.Contains(i0);
+            if (id is int i1) ImGui.TextDisabled(Describe(i1));
+            if (id != null && !hasOwn) ImGui.TextColored(Theme.Warn, "This animation has no HKX file of its own in the anibnd (nothing to replace; use Add).");
+
+            ImGui.Spacing();
+            ImGui.TextDisabled("New .hkx file (already retargeted to this character's skeleton)");
+            ImGui.SetNextItemWidth(-90);
+            ImGui.InputText("##rep_path", ref _repPath, 400, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##rep")) BrowseReplaceHkx();
+            if (_repInfo != null) ImGui.TextDisabled(_repInfo);
+            ImGui.PushTextWrapPos(0);
+            foreach (var p in _repProblems) ImGui.TextColored(Theme.Warn, p.Replace("%", "%%"));
+            ImGui.PopTextWrapPos();
+
+            bool blocking = _repProblems.Any(p => p.StartsWith("Not a Havok") || p.StartsWith("Could not read") || p.Contains("no animation") || p.Contains("skeleton has"));
+            ImGui.Spacing();
+            ImGui.BeginDisabled(!hasOwn || _repBytes == null || blocking);
+            if (ImGui.Button(id is int rid ? $"Replace {AnimSlots.IdName(rid)}" : "Replace")) DoReplace(id!.Value);
+            ImGui.EndDisabled();
+            if (blocking) ImGui.TextColored(Theme.Error, "This file can't be used on this character (see above).");
+            else if (_repBytes != null && _repProblems.Count > 0)
+                ImGui.TextColored(Theme.Warn, "Warnings above: it can still replace the motion, but check it plays correctly before saving.");
+            ImGui.Spacing();
+            ImGui.TextDisabled("The old HKX is first copied into the project's backups. Ctrl+S then backs up the anibnd before writing it. Undo: Edit > Undo [Global] Action.");
+        }
+
+        private void BrowseReplaceHkx()
+        {
+            DSAnimStudio.Main.MainThreadLazyDispatch(() =>
+            {
+                using var dlg = new System.Windows.Forms.OpenFileDialog { Title = "Animation .hkx to replace with", Filter = "Havok animation (*.hkx)|*.hkx|All files (*.*)|*.*" };
+                if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+                LoadReplaceHkx(dlg.FileName);
+            });
+        }
+
+        private void LoadReplaceHkx(string path)
+        {
+            _repPath = path;
+            _repBytes = null;
+            _repProblems = new List<string>();
+            _repInfo = null;
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                var check = AnimSlots.CheckHkx(bytes, _snap?.CompendiumIds ?? new HashSet<string>());
+                _repProblems.AddRange(check.Problems);
+                if (check.IsSekiroTagfile) _repProblems.AddRange(AnimSlotsBridge.CheckAgainstSkeleton(bytes, _snap?.Compendium));
+                _repBytes = bytes;
+                _repInfo = $"{bytes.Length / 1024.0:0.#} KB" + (_repProblems.Count == 0 ? ", matches this character's skeleton" : "");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _repProblems.Add("Could not read the file: " + ex.Message); }
+        }
+
+        private void DoReplace(int id)
+        {
+            try
+            {
+                var old = AnimSlotsBridge.CurrentHkx(id) ?? throw new InvalidOperationException($"{AnimSlots.IdName(id)} has no HKX file of its own.");
+                // Backup first: if this fails nothing was changed.
+                string dir = _app.Project?.BackupDir is { Length: > 0 } b ? Path.Combine(b, "replaced-hkx") : Path.Combine(SasSettings.UserDataDir, "replaced-hkx");
+                Directory.CreateDirectory(dir);
+                string bak = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss}-{AnimSlots.IdName(id)}.hkx");
+                File.WriteAllBytes(bak, old);
+                AnimSlotsBridge.ApplyReplace(id, _repBytes!);
+                _app.Notify($"Replaced the HKX of {AnimSlots.IdName(id)}. Old file saved to {bak}. Not saved into the anibnd yet: Ctrl+S (it backs the anibnd up first).");
+            }
+            catch (Exception ex) { _app.ReportError("Replace animation HKX", ex); }
+            _snap = AnimSlotsBridge.Read();
         }
 
         private void DoAdd(int id)

@@ -16,12 +16,12 @@ namespace SoulsAiStudio.Editor;
 /// <para>All text entry (code, find field, go-to field) goes through <see cref="IKeyInput"/>; the widget
 /// never uses native ImGui.InputText, so typed chars have exactly one source.</para>
 /// </summary>
-public sealed class LuaCodeEditor
+public sealed partial class LuaCodeEditor
 {
     /// <summary>Lines (re)colorized per frame at most. A 3000-line file colors fully in the first frame.</summary>
     const int ColorizeBudgetPerFrame = 8000;
 
-    internal enum FocusTarget { Text, Find, Replace, Goto }
+    internal enum FocusTarget { Text, Find, Replace, Goto, Rename }
 
     readonly EditorCore _core = new();
     readonly DiagnosticStore _diagnostics = new();
@@ -35,6 +35,7 @@ public sealed class LuaCodeEditor
     readonly LineInput _findField = new(256);
     readonly LineInput _gotoField = new(9, digitsOnly: true);
     readonly LineInput _replaceField = new(256);
+    readonly LineInput _renameField = new(64);
     readonly CompletionController _completion;
 
     int _highlightLine = -1;
@@ -58,6 +59,9 @@ public sealed class LuaCodeEditor
     Coordinates _findOrigin;
     int _findFieldSeenVersion = -1;
     bool _gotoOpen;
+    bool _renameOpen;
+    EditorSymbol? _renameSymbol;
+    string _renameError = "";
     bool _replaceOpen;
     int _replaceStatusCount = -1; // "Replaced N" shown until the text changes again
     long _replaceStatusVersion = -1;
@@ -326,6 +330,8 @@ public sealed class LuaCodeEditor
                 DrawFindBar();
             if (_gotoOpen)
                 DrawGotoBar();
+            if (_renameOpen)
+                DrawRenameBar();
 
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
             if (ImGui.BeginChild("##text", Vector2.Zero, false, ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoNavInputs))
@@ -390,20 +396,24 @@ public sealed class LuaCodeEditor
             OpenGoto();
         if (k.IsPressed(EditorKey.F3))
             FindStep(!shift);
+        if (!ctrl && !alt && !shift && k.IsPressed(EditorKey.F2))
+            OpenRename();
+        if (!ctrl && alt && shift && k.IsPressed(EditorKey.F))
+            FormatRequested?.Invoke(); // Shift+Alt+F
         if (k.IsPressed(EditorKey.Escape))
         {
             if (_target == FocusTarget.Text && _completion.IsOpen)
                 _completion.Close(); // Escape closes the popup first, the bars on the next press
             else if (_target == FocusTarget.Text && _core.HasExtras)
                 _core.CollapseToPrimary(); // then the secondary carets
-            else if (_findOpen || _gotoOpen)
+            else if (_findOpen || _gotoOpen || _renameOpen)
             {
                 CloseBars();
                 return;
             }
         }
 
-        if ((_target == FocusTarget.Find || _target == FocusTarget.Replace) && !_findOpen || _target == FocusTarget.Goto && !_gotoOpen)
+        if ((_target == FocusTarget.Find || _target == FocusTarget.Replace) && !_findOpen || _target == FocusTarget.Goto && !_gotoOpen || _target == FocusTarget.Rename && !_renameOpen)
             _target = FocusTarget.Text;
         if (_target == FocusTarget.Replace && !_replaceOpen)
             _target = FocusTarget.Find;
@@ -448,6 +458,11 @@ public sealed class LuaCodeEditor
                     else
                         _focusTextNextFrame = true;
                 }
+                break;
+
+            case FocusTarget.Rename:
+                if (FeedField(_renameField, k, chars, enterCooling))
+                    ApplyRename();
                 break;
 
             default:
@@ -618,6 +633,7 @@ public sealed class LuaCodeEditor
         bool wasInBar = _findOpen && (_target == FocusTarget.Find || _target == FocusTarget.Replace);
         _findOpen = true;
         _gotoOpen = false;
+        _renameOpen = false;
         if (replace)
             _replaceOpen = true;
         else if (!wasInBar)
@@ -635,6 +651,7 @@ public sealed class LuaCodeEditor
         _completion.Close();
         _gotoOpen = true;
         _findOpen = false;
+        _renameOpen = false;
         _target = FocusTarget.Goto;
         _gotoField.Clear();
     }
@@ -643,6 +660,7 @@ public sealed class LuaCodeEditor
     {
         _findOpen = false;
         _gotoOpen = false;
+        _renameOpen = false;
         _target = FocusTarget.Text;
         _focusTextNextFrame = true;
     }
@@ -751,6 +769,8 @@ public sealed class LuaCodeEditor
             CurrentMatchEnd = _core.SelectionEnd,
         };
 
+        _linkUse = null;
+        _linkDecl = null;
         if (!HandlePopupMouse())
             HandleMouse(in f);
 
@@ -780,6 +800,8 @@ public sealed class LuaCodeEditor
 
         _sink.Begin(ImGui.GetWindowDrawList());
         _view.Draw(_sink, m, in f);
+        DrawCaretWordHighlight(origin, visible);
+        DrawLinkHighlight(origin);
         if (_completion.IsOpen)
             _completion.Update(); // picks up the background buffer scan
         DrawCompletionPopup(in f);
@@ -930,11 +952,28 @@ public sealed class LuaCodeEditor
         if (hovered && mouse.X >= gutterRight)
             ImGui.SetMouseCursor(ImGuiMouseCursor.TextInput);
 
+        bool ctrlOnly = KeyInput.Ctrl && !KeyInput.Alt && !KeyInput.Shift;
+        if (hovered && ctrlOnly && SymbolProvider != null && mouse.X >= gutterRight)
+        {
+            var over = _view.ScreenToCoordinates(mouse, in f, _metrics);
+            if (DefinitionOf(over) is { } declSpan && _defKeyUse is { } useSpan)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand); // Ctrl+Click jumps to the declaration
+                _linkUse = useSpan;
+                _linkDecl = declSpan;
+            }
+        }
+
         if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             _target = FocusTarget.Text;
             _completion.Close();
             var pos = _view.ScreenToCoordinates(mouse, in f, _metrics);
+            if (ctrlOnly && mouse.X >= gutterRight && DefinitionOf(pos) is { } decl)
+            {
+                GoToDeclaration(decl);
+                return;
+            }
             if (mouse.X < gutterRight)
             {
                 int line = pos.Line;

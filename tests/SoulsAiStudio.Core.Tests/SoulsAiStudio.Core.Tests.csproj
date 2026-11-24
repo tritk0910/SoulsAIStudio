@@ -20,5 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SoulsAiStudio.Core\SoulsAiStudio.Core.csproj" />
+    <ProjectReference Include="..\..\src\SoulsAiStudio.Mcp\SoulsAiStudio.Mcp.csproj" />
   </ItemGroup>
 </Project>

@@ -234,6 +234,7 @@ namespace SoulsAiStudio.App
                 (SasLayout.ScriptsWindow, inProject && _scripts.IsOpen), (SasLayout.EditorWindow, inProject && _editor.IsOpen),
                 (ComboPanel.WindowName, inProject && _combo.IsOpen), (LuabndToolsPanel.WindowName, inProject && _luabnd.IsOpen),
                 (EventFinderPanel.WindowName, _finder.IsOpen), (SpEffectLabelsWindow.WindowName, _spLabels.IsOpen), (AddScriptsWindow.WindowName, inProject && _addScripts.IsOpen),
+                (AnimSlotsWindow.WindowName, _animSlots.IsOpen), (SpEffectLuaLink.AskWindowName, SpEffectLink.AskOpen), (SpEffectLuaLink.ResultWindowName, SpEffectLink.ResultOpen),
             });
             SasHooks.GraphHidden = !Layout.GraphVisible || Layout.WindowNestedInGraph
                                    || (inProject && _editor.VisibleInDockId != 0 && _editor.VisibleInDockId == Layout.GraphDockId);
@@ -259,6 +260,8 @@ namespace SoulsAiStudio.App
             if (ImGui.MenuItem("SpEffect Labels...")) _spLabels.Open();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Name SpEffect ids (e.g. 200210 = Strong parry (right)); the names show in the Combo and Find Events windows.");
             if (ImGui.MenuItem("Swap / Add Animation...", "", false, Bridge.LoadedAnibnd != null)) _animSlots.Open();
+            if (ImGui.MenuItem("Replace Animation HKX...", "", false, Bridge.LoadedAnibnd != null)) _animSlots.Open(replace: true);
+            if (ImGui.MenuItem("Add SpEffect Handler to Lua...", "", false, Session != null)) SpEffectLink.Ask();
             if (ImGui.MenuItem("Undo Last Animation Swap", "", false, _animSlots.WhyCantUndoLastSwap() == null)) _animSlots.UndoLastSwap(); // anibnd + Lua scripts as one step
             if (ImGui.BeginMenu("Updates"))
             {
@@ -291,6 +294,9 @@ namespace SoulsAiStudio.App
             }
             if (ImGui.MenuItem("Allow Windows IME in Lua Editor", "", Settings.AllowImeInEditor)) { Settings.AllowImeInEditor = !Settings.AllowImeInEditor; Settings.Save(); }
             WatchFilesMenuItem();
+            if (ImGui.MenuItem("Format Lua on Save", "", Settings.FormatOnSave)) { Settings.FormatOnSave = !Settings.FormatOnSave; Settings.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Indent, spacing and blank lines are tidied when a Lua script is saved (one undo step; skipped when the script has a syntax error).");
+            if (ImGui.MenuItem("Format Lua Script", "Shift+Alt+F", false, _editor.Active?.Doc != null)) _editor.FormatActive();
             if (ImGui.MenuItem("Lighting Like DSAS 4.9.9", "", Settings.Lighting499))
             {
                 Settings.Lighting499 = !Settings.Lighting499;

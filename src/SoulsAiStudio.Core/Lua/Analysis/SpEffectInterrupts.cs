@@ -42,6 +42,8 @@ public static class SpEffectInterrupts
         public IReadOnlySet<string> SpEffectVars { get; init; } = new HashSet<string>();
         /// <summary>Every target each SpEffect is observed on (a SpEffect can be observed on both <c>TARGET_SELF</c> and <c>TARGET_ENE_0</c>).</summary>
         public IReadOnlyDictionary<int, IReadOnlyList<string>> ObservedTargets { get; init; } = new Dictionary<int, IReadOnlyList<string>>();
+        /// <summary>Every <c>== S</c> arm in source order, including duplicates: <see cref="Handlers"/> keeps only the first arm per id.</summary>
+        public IReadOnlyList<SpEffectHandler> AllArms { get; init; } = [];
     }
 
     public static Table Build(string src) => Build(src, LuaLexer.Tokenize(src), GoalOutline.Build(src));
@@ -76,6 +78,7 @@ public static class SpEffectInterrupts
         }
 
         var handlers = new Dictionary<int, SpEffectHandler>();
+        var allArms = new List<SpEffectHandler>();
         foreach (var goal in outline.Where(g => g.Name == "Interrupt"))
         {
             var distVars = DistanceVars(src, t, goal.Line, goal.EndLine);
@@ -90,16 +93,51 @@ public static class SpEffectInterrupts
                     int endLine = hasNext ? branch.Arms[a + 1].Line - 1 : line + 3;
                     int armEnd = hasNext ? endLine : Math.Max(line, MaxLine(arm.Body)) + 1;
                     foreach (int id in SpEffectIds(arm.Condition, spVars))
-                        handlers.TryAdd(id, new SpEffectHandler(id, line,
+                    {
+                        var h = new SpEffectHandler(id, line,
                             arm.Body.FirstOrDefault() is ComboClear,
                             Replans(src, t, line, endLine, arm), arm.Body, arm.Condition, RandomChance(arm.Condition, randVars),
                             HasNonRandomPart(arm.Condition, spVars, randVars, distVars),
                             MentionsDistance(arm.Condition, distVars)
                                 || ComboSequence.Branches(arm.Body).Any(b => b.Arms.Any(x => MentionsDistance(x.Condition, distVars))),
-                            armEnd, MentionsDistance(arm.Condition, distVars)));
+                            armEnd, MentionsDistance(arm.Condition, distVars));
+                        handlers.TryAdd(id, h);
+                        allArms.Add(h);
+                    }
                 }
         }
-        return new Table(handlers, observed) { RandomVars = randVars, SpEffectVars = spVars, ObservedTargets = observedAll };
+        return new Table(handlers, observed) { RandomVars = randVars, SpEffectVars = spVars, ObservedTargets = observedAll, AllArms = allArms.OrderBy(a => a.Line).ToList() };
+    }
+
+    /// <summary>
+    /// Numbers compared (<c>==</c> / <c>~=</c>, either side) with a variable that holds a SpEffect id: assigned from
+    /// <c>GetSpecialEffectActivateInterruptType(...)</c> or <c>ReturnKengekiSpecialEffect(...)</c>, in any function
+    /// (e.g. <c>if kengekiEffect == 200200 then</c>). Found by what is assigned, not by the variable name.
+    /// </summary>
+    public static IReadOnlySet<int> ComparedSpEffectIds(string src, IReadOnlyList<LuaToken> all)
+    {
+        var t = all.Where(x => x.Kind != LuaTokenKind.Comment).ToList();
+        var vars = new HashSet<string>(StringComparer.Ordinal);
+        for (int j = 0; j + 2 < t.Count; j++)
+        {
+            if (t[j].Kind != LuaTokenKind.Identifier || !t[j + 1].Is(src, "=")) continue;
+            // name = ReturnKengekiSpecialEffect ( … )   |   name = obj : GetSpecialEffectActivateInterruptType ( … )
+            if (t[j + 2].Is(src, "ReturnKengekiSpecialEffect")
+                || (j + 4 < t.Count && t[j + 3].Is(src, ":") && t[j + 4].Is(src, "GetSpecialEffectActivateInterruptType")))
+                vars.Add(t[j].Text(src).ToString());
+        }
+        var ids = new HashSet<int>();
+        if (vars.Count == 0) return ids;
+        for (int j = 0; j + 2 < t.Count; j++)
+        {
+            if (!t[j + 1].Is(src, "==") && !t[j + 1].Is(src, "~=")) continue;
+            var a = t[j]; var b = t[j + 2];
+            if (a.Kind == LuaTokenKind.Identifier && vars.Contains(a.Text(src).ToString()) && b.Kind == LuaTokenKind.Number
+                && int.TryParse(b.Text(src), out int idB)) ids.Add(idB);
+            else if (b.Kind == LuaTokenKind.Identifier && vars.Contains(b.Text(src).ToString()) && a.Kind == LuaTokenKind.Number
+                && int.TryParse(a.Text(src), out int idA)) ids.Add(idA);
+        }
+        return ids;
     }
 
     /// <summary>

@@ -29,6 +29,8 @@ namespace SoulsAiStudio.App
         public bool AllowImeInEditor { get; set; }
         /// <summary>Watch project files for changes made by other programs (Souls AI > Watch Files for External Changes).</summary>
         public bool WatchFiles { get; set; } = true;
+        /// <summary>Format the Lua script (indent, spacing, blank lines) when it is saved (Souls AI > Format Lua on Save).</summary>
+        public bool FormatOnSave { get; set; } = true;
         /// <summary>DSAS Log window's "Hide Popup Notifications" (DSAS keeps it only in memory). See SasHooks.HideNotificationPopupsChanged.</summary>
         public bool HideNotificationPopups { get; set; }
         /// <summary>Ask GitHub for a newer release on launch (Souls AI > Updates). See UpdateService.</summary>

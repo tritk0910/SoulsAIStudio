@@ -13,6 +13,7 @@ public enum EditorKey
     F,      // Ctrl+F  find
     G,      // Ctrl+G  go to line
     F3,     // F3 / Shift+F3  find next / previous
+    F2,     // F2  rename the local variable under the cursor
     H,      // Ctrl+H  find + replace
     Space,  // Ctrl+Space  suggestions
     L,      // Ctrl+L  select line
@@ -100,6 +101,7 @@ public class ImGuiKeyInput : IKeyInput
         EditorKey.F => ImGuiKey.F,
         EditorKey.G => ImGuiKey.G,
         EditorKey.F3 => ImGuiKey.F3,
+        EditorKey.F2 => ImGuiKey.F2,
         EditorKey.H => ImGuiKey.H,
         EditorKey.Space => ImGuiKey.Space,
         EditorKey.L => ImGuiKey.L,

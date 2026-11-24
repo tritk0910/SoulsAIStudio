@@ -222,6 +222,44 @@ namespace SoulsAiStudio.App
                 actionDescription: $"Add {AnimSlots.IdName(id)}");
         }
 
+        // ---------------------------------------------------------------- replace
+
+        /// <summary>The HKX file bytes the anibnd holds for <paramref name="id"/>, or null when it has none of its own.</summary>
+        public static byte[]? CurrentHkx(int id) =>
+            Tae is { } t && Binder(t)?.Files.FirstOrDefault(f => f.ID == AnimSlots.HkxBinderId(id)) is { } f ? f.Bytes : null;
+
+        /// <summary>
+        /// Replaces the HKX of <paramref name="id"/> with <paramref name="bytes"/> (one DSAS global undo step; saved into the
+        /// anibnd with Ctrl+S, which backs the anibnd up first). The TAE entry and its events are left alone.
+        /// </summary>
+        public static void ApplyReplace(int id, byte[] bytes)
+        {
+            var tae = Tae ?? throw new InvalidOperationException("No character loaded.");
+            var binder = Binder(tae) ?? throw new InvalidOperationException("Can't access the anibnd's files.");
+            var file = binder.Files.FirstOrDefault(f => f.ID == AnimSlots.HkxBinderId(id))
+                       ?? throw new InvalidOperationException($"{AnimSlots.IdName(id)} has no HKX file of its own in this anibnd.");
+            byte[] old = file.Bytes;
+            tae.GlobalUndoMan.NewAction(
+                doAction: () => { SetHkx(tae, id, bytes); AfterChange(tae, id); },
+                undoAction: () => SetHkx(tae, id, old),
+                actionDescription: $"Replace HKX of {AnimSlots.IdName(id)}");
+        }
+
+        private static void SetHkx(TaeEditorScreen tae, int id, byte[] bytes)
+        {
+            if (Binder(tae) is not { } binder) return;
+            var file = binder.Files.FirstOrDefault(f => f.ID == AnimSlots.HkxBinderId(id));
+            if (file == null) return;
+            file.Bytes = bytes;
+            string? compName = binder.Files.FirstOrDefault(f => f.ID == 7000000)?.Name;
+            var container = tae.Graph?.ViewportInteractor?.CurrentModel?.AnimContainer;
+            if (container != null)
+            {
+                RemoveFromContainer(tae, id); // AddNewHKXToLoad throws on an existing id
+                container.AddNewHKXToLoad(SplitAnimID.FromFullID(tae.Proj, id), System.IO.Path.GetFileName(file.Name), bytes, compName);
+            }
+        }
+
         // ---------------------------------------------------------------- HKX files + anim container
 
         private static IEnumerable<DSAProj.Animation> AllAnims(DSAProj proj) =>

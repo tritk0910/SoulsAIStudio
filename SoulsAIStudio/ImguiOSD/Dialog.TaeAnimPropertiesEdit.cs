@@ -232,7 +232,7 @@ namespace DSAnimStudio.ImguiOSD
 
                 //Tools.CustomColorPicker("Custom Display Color", $"{OriginalAnimation.GUID}__PropetiesEditor__CustomColor", ref TaeAnimCustomColor);
 
-                ImGui.Separator();
+                // [SAS] one separator is enough now that the custom name/description fields between them are gone
 
                 ImGui.Text("Animation Type:");
 

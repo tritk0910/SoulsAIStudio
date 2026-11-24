@@ -42,6 +42,9 @@ namespace SoulsAiStudio.App
         /// <summary>SpEffect ids the script handles in Goal.Interrupt or observes (hover tooltips).</summary>
         public IReadOnlySet<int> SpEffectIds = new HashSet<int>();
         public long OutlineVersion = -1;
+        /// <summary>Scope analysis for F2 / Ctrl+Click, rebuilt on demand when the text version changes.</summary>
+        public SoulsAiStudio.Core.Lua.Analysis.LuaScopes? Scopes;
+        public long ScopesVersion = -1;
         public DateTime LastEdit = DateTime.MinValue;
         /// <summary>Run once on the UI thread right after the text is loaded (e.g. the Lua part of an animation swap).</summary>
         public readonly List<Action<OpenScript>> AfterLoad = new();
@@ -109,6 +112,9 @@ namespace SoulsAiStudio.App
                 existing = new OpenScript(script, _keys, _completions) { Loading = _app.Session!.OpenAsync(script) };
                 var created = existing;
                 existing.Editor.NumberHoverText = (n, line) => SpEffectHoverText(created, n, line);
+                existing.Editor.SymbolProvider = (l, c) => SymbolAt(created, l, c);          // F2 rename, Ctrl+Click (LuaEditorPanel.Symbols.cs)
+                existing.Editor.RenameValidator = ValidateRename;
+                existing.Editor.FormatRequested += () => FormatDocument(created, notify: true);
                 _open.Add(existing);
             }
             if (afterLoad != null)
@@ -183,6 +189,7 @@ namespace SoulsAiStudio.App
         private void Save(OpenScript o)
         {
             if (o.Doc == null || o.Saving != null || !o.IsDirty) return;
+            if (_app.Settings.FormatOnSave) FormatDocument(o, notify: true);
             o.SavingVersion = o.Editor.Version;
             o.SavingText = o.Editor.Text;
             o.Saving = _app.Session!.SaveAsync(o.Doc, o.SavingText);
@@ -427,7 +434,7 @@ namespace SoulsAiStudio.App
                     var tokens = SoulsAiStudio.Core.Lua.Syntax.LuaLexer.Tokenize(snapshot);
                     var outline = GoalOutline.Build(snapshot, tokens);
                     var sp = SpEffectInterrupts.Build(snapshot, tokens, outline);
-                    IReadOnlySet<int> spIds = sp.Handlers.Keys.Concat(sp.ObservedTargets.Keys).ToHashSet();
+                    IReadOnlySet<int> spIds = sp.Handlers.Keys.Concat(sp.ObservedTargets.Keys).Concat(SpEffectInterrupts.ComparedSpEffectIds(snapshot, tokens)).ToHashSet();
                     return (outline, AnimReferences.Build(snapshot, tokens).ToLookup(a => a.Line), HotReloadStub.Has(snapshot),
                             SoulsAiStudio.Core.Lua.Syntax.LuaSyntaxChecker.Check(snapshot), spIds);
                 });

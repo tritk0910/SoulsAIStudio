@@ -18,7 +18,10 @@ namespace SoulsAiStudio.App
     public sealed class SpEffectLuaLink
     {
         private static readonly int[] SpEffectEventTypes = { 67, 66, 302, 401, 331, 797 };
-        private const string PopupId = "sas_sp_lua_popup";
+        public const string AskWindowName = "Add SpEffect handler##sas_sp_ask";
+        public const string ResultWindowName = "SpEffect in Lua##sas_sp_win";
+        public bool AskOpen => _askOpen;
+        public bool ResultOpen => _winOpen && _popupSpEffect > 0;
 
         private sealed record Row(ProjectScript Script, int HandlerLine, IReadOnlyList<string> Observed, string? Error);
 
@@ -38,20 +41,10 @@ namespace SoulsAiStudio.App
         {
             if (_app.Session == null || spEffectId <= 0) return;
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Lua##sas_sp_lua_{spEffectId}"))
-            {
-                _popupSpEffect = spEffectId;
-                Refresh();
-                ImGui.OpenPopup(PopupId);
-            }
+            if (ImGui.SmallButton($"Lua##sas_sp_lua_{spEffectId}")) Request(spEffectId);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip($"SpEffect {_app.SpEffectText(spEffectId).Replace("%", "%%")} in the AI scripts of this character:\n" +
                                  "jump to its branch in Goal.Interrupt, or add one (TARGET_SELF / TARGET_ENE_0).");
-            if (_popupSpEffect == spEffectId && ImGui.BeginPopup(PopupId))
-            {
-                try { DrawPopup(spEffectId); }
-                finally { ImGui.EndPopup(); }
-            }
         }
 
         /// <summary>Reads (off the UI thread) every project script of the loaded character and looks the SpEffect up.</summary>
@@ -112,7 +105,7 @@ namespace SoulsAiStudio.App
                     if (ImGui.Selectable($"Go to Goal.Interrupt branch (line {r.HandlerLine + 1})"))
                     {
                         Open(r.Script, o => o.Editor.GoToLine(r.HandlerLine));
-                        ImGui.CloseCurrentPopup();
+                        _winOpen = false;
                     }
                     if (r.Observed.Count > 0) ImGui.TextDisabled("Observed on " + string.Join(", ", r.Observed));
                     else
@@ -136,11 +129,11 @@ namespace SoulsAiStudio.App
         private void AddButtons(Row r, int id, bool readOnly, string verb)
         {
             ImGui.BeginDisabled(readOnly);
-            if (ImGui.Button($"{verb}: TARGET_SELF")) { Add(r.Script, id, SpEffectHandlerWriter.TargetSelf); ImGui.CloseCurrentPopup(); }
+            if (ImGui.Button($"{verb}: TARGET_SELF")) { Add(r.Script, id, SpEffectHandlerWriter.TargetSelf); _winOpen = false; }
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 ImGui.SetTooltip(readOnly ? "Read-only project (no mod folder)." : "The SpEffect is put on the enemy itself (e.g. a TAE SpEffect event of its own anim).");
             ImGui.SameLine();
-            if (ImGui.Button($"{verb}: TARGET_ENE_0")) { Add(r.Script, id, SpEffectHandlerWriter.TargetEnemy); ImGui.CloseCurrentPopup(); }
+            if (ImGui.Button($"{verb}: TARGET_ENE_0")) { Add(r.Script, id, SpEffectHandlerWriter.TargetEnemy); _winOpen = false; }
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 ImGui.SetTooltip(readOnly ? "Read-only project (no mod folder)." : "The SpEffect is put on its target, the player (e.g. by an attack that hits).");
             ImGui.EndDisabled();
@@ -163,21 +156,74 @@ namespace SoulsAiStudio.App
         /// <summary>Opens the SpEffect's popup (scripts of the loaded character) from elsewhere, e.g. the Combo panel's menus.</summary>
         public void Request(int spEffectId) => _pending = spEffectId;
 
+        private bool _askOpen, _askFocus, _askNew;
+        private string _askText = "";
+
+        /// <summary>Menu entry: asks for any SpEffect id (not tied to a TAE event), then shows the same window as the "Lua" button.</summary>
+        public void Ask() { _askOpen = true; _askFocus = true; _askNew = true; _askText = ""; } // fresh field each time (no appending to the last id)
+
+        // Plain windows, not popups: popups can't be dragged, and these sit on top of the viewport.
+        private void PlaceNewWindow(ref bool isNew)
+        {
+            if (!isNew) return;
+            isNew = false;
+            ImGui.SetNextWindowPos(ImGui.GetMousePos() + new System.Numerics.Vector2(12, 12), ImGuiCond.Always);
+            ImGui.SetNextWindowFocus();
+        }
+
+        private void DrawAsk()
+        {
+            if (!_askOpen) return;
+            PlaceNewWindow(ref _askNew);
+            bool open = true;
+            bool shown = Theme.BeginOpaque(AskWindowName, ref open, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking); // transient: dragging it must not dock it into the layout
+            if (!open) _askOpen = false;
+            if (!shown) { ImGui.End(); return; }
+            try
+            {
+                ImGui.TextUnformatted("Add a SpEffect handler to the AI scripts");
+                ImGui.TextDisabled("Adds `== id` in Goal.Interrupt and the AddObserveSpecialEffectAttribute in Goal.Activate.");
+                if (_askFocus) { ImGui.SetKeyboardFocusHere(); _askFocus = false; }
+                ImGui.SetNextItemWidth(160);
+                bool enter = ImGui.InputTextWithHint("##sp_ask_id", "SpEffect id, e.g. 5060040", ref _askText, 16,
+                    ImGuiInputTextFlags.CharsDecimal | ImGuiInputTextFlags.EnterReturnsTrue);
+                bool ok = int.TryParse(_askText.Trim(), out int id) && id > 0;
+                if (ok) ImGui.TextDisabled(_app.SpEffectDisplayName(id) is { } n ? n : "(no name in SpEffectParam)");
+                else ImGui.TextDisabled(" ");
+                ImGui.BeginDisabled(!ok);
+                if (ImGui.Button("Next") || (enter && ok)) { Request(id); _askOpen = false; }
+                ImGui.EndDisabled();
+            }
+            finally { ImGui.End(); }
+        }
+
+        private bool _winOpen, _winNew;
+
+        private void DrawWindow()
+        {
+            if (!_winOpen || _popupSpEffect <= 0) return;
+            PlaceNewWindow(ref _winNew);
+            bool open = true;
+            bool shown = Theme.BeginOpaque(ResultWindowName, ref open, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking); // transient: dragging it must not dock it into the layout
+            if (!open) _winOpen = false;
+            if (!shown) { ImGui.End(); return; }
+            try { DrawPopup(_popupSpEffect); }
+            finally { ImGui.End(); }
+        }
+
         /// <summary>Every frame at the top level (SasApp): shows the popup requested with <see cref="Request"/>.</summary>
         public void DrawRequested()
         {
+            DrawAsk();
             if (_pending > 0)
             {
                 _popupSpEffect = _pending;
                 _pending = 0;
                 Refresh();
-                ImGui.OpenPopup(PopupId + "_req");
+                _winOpen = true;
+                _winNew = true;
             }
-            if (_popupSpEffect > 0 && ImGui.BeginPopup(PopupId + "_req"))
-            {
-                try { DrawPopup(_popupSpEffect); }
-                finally { ImGui.EndPopup(); }
-            }
+            DrawWindow();
         }
 
         private void Add(ProjectScript script, int id, string target) => Open(script, o =>

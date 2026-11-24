@@ -58,6 +58,7 @@ namespace SoulsAiStudio.App
             EditorKey.F => Edge(Keys.F),
             EditorKey.G => Edge(Keys.G),
             EditorKey.F3 => Edge(Keys.F3),
+            EditorKey.F2 => Edge(Keys.F2),
             EditorKey.H => Edge(Keys.H),
             EditorKey.Space => Edge(Keys.Space),
             // VSCode-style line commands (DSAS does not forward these letters/symbols to ImGui).

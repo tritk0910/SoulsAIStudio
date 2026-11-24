@@ -528,7 +528,7 @@ namespace DSAnimStudio.ImguiOSD
                                 DialogManager.AnyDialogsShowing;
 
 
-                var isHovered = anyWindowHovered || ImGui.IsAnyItemHovered();
+                var isHovered = anyWindowHovered || ImGui.IsAnyItemHovered() || SoulsAiStudio.App.SasHooks.OurWindowHovered; // [SAS] our windows (floating over the viewport) weren't counted, so clicks/drags on them moved the camera
 
                 if (isFocused)
                     focusedHist = 2;
